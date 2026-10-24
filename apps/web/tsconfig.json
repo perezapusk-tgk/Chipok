@@ -1,1 +1,24 @@
-{"compilerOptions":{"target":"ES2022","lib":["dom","es2022"],"strict":true,"jsx":"preserve","module":"esnext","moduleResolution":"bundler","noEmit":true},"include":["**/*.ts","**/*.tsx"]}
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "dom",
+      "es2022"
+    ],
+    "strict": true,
+    "jsx": "preserve",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "types": [
+      "node",
+      "react",
+      "react-dom",
+      "next"
+    ]
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ]
+}
