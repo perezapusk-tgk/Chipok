@@ -46,7 +46,8 @@ async function auth(request:any){
  const r=await pool.query(`insert into users(telegram_id,first_name,last_name,username,language_code,is_premium) values($1,$2,$3,$4,$5,$6) on conflict(telegram_id) do update set first_name=excluded.first_name,last_name=excluded.last_name,username=excluded.username,language_code=excluded.language_code,is_premium=excluded.is_premium,updated_at=now() returning id,telegram_id,first_name,last_name,username,language_code,is_premium,role`,[user.id,user.first_name,user.last_name??null,user.username??null,user.language_code??null,user.is_premium??false]);
  return r.rows[0];
 }
-app.get("/health",async()=>({ok:true,service:"chipok-api",version:"0.3.1"}));
+app.get("/",async()=>({ok:true,service:"chipok-api",name:"ЧИПОК API",version:"0.3.2",health:"/health"}));
+app.get("/health",async()=>({ok:true,service:"chipok-api",version:"0.3.2"}));
 async function configureTelegramWebhook(){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;
