@@ -249,6 +249,8 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
     }
     await c.query("update seller_orders set status='refunded' where order_id=$1 and status<>'completed'",[d.order_id]);
     await c.query("update orders set status='refunded',updated_at=now() where id=$1",[d.order_id]);
+    await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'order_refunded','Заказ возвращён','Средства по спору возвращены.' from orders where id=$1",[d.order_id]);
+    await c.query("insert into notifications(user_id,type,title,body) select so.seller_id,'order_refunded','Возврат по спору','По заказу оформлен возврат средств.' from seller_orders so where so.order_id=$1",[d.order_id]);
    }
   } else {
    const restored=d.previous_order_status||"completed";
