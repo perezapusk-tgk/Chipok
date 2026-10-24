@@ -81,7 +81,7 @@ app.get("/api/orders/:id/handover",async(req,reply)=>{
 
 app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
  const seller=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
- const body=z.object({code:z.string().regex(/^\\d{6}$/)}).parse(req.body);
+ const body=z.object({code:z.string().regex(/^\d{6}$/)}).parse(req.body);
  const result=await withTransaction(async(c)=>{
   const so=(await c.query("select so.*,o.id as order_id,o.buyer_id from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
   if(!so)return null;
