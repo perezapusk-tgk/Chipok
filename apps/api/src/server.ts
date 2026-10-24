@@ -11,6 +11,17 @@ function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missin
 function hashHandover(code:string){return createHash("sha256").update(code).digest("hex")}
 function makeHandoverCode(){return String(randomInt(100000,1000000))}
 function handoverKey(){return createHash("sha256").update(env("TELEGRAM_BOT_TOKEN")).digest()}
+async function expireUnpaidOrders(){
+ await pool.query(`with expired as (
+   select id from orders where status='created' and expires_at is not null and expires_at<=now() for update skip locked
+ ), released as (
+   update inventory i set reserved=greatest(0,i.reserved-x.qty),updated_at=now()
+   from (select oi.product_id,sum(oi.quantity)::int qty from order_items oi join seller_orders so on so.id=oi.seller_order_id join expired e on e.id=so.order_id group by oi.product_id) x
+   where i.product_id=x.product_id returning i.product_id
+ )
+ update seller_orders so set status='cancelled' where so.order_id in (select id from expired) and so.status='created';
+ update orders set status='cancelled',updated_at=now() where status='created' and expires_at is not null and expires_at<=now();`);
+}
 function encryptHandover(code:string){const iv=Buffer.from(randomUUID().replaceAll("-","").slice(0,24),"hex");const cipher=createCipheriv("aes-256-gcm",handoverKey(),iv);const data=Buffer.concat([cipher.update(code,"utf8"),cipher.final()]);return iv.toString("hex")+":"+cipher.getAuthTag().toString("hex")+":"+data.toString("hex")}
 function decryptHandover(value:string){const [ivHex,tagHex,dataHex]=value.split(":");const decipher=createDecipheriv("aes-256-gcm",handoverKey(),Buffer.from(ivHex,"hex"));decipher.setAuthTag(Buffer.from(tagHex,"hex"));return Buffer.concat([decipher.update(Buffer.from(dataHex,"hex")),decipher.final()]).toString("utf8")}
 async function auth(request:any){
@@ -37,7 +48,7 @@ app.get("/api/products/:id",async(req,reply)=>{
  const r=await pool.query(`select p.*,s.name as store_name,s.seller_id,i.stock-i.reserved as available_stock,coalesce((select json_agg(json_build_object('id',x.id,'url',x.url,'sort_order',x.sort_order) order by x.sort_order,x.id) from product_images x where x.product_id=p.id),'[]') as images from products p left join stores s on s.id=p.store_id join inventory i on i.product_id=p.id where p.id=$1`,[id]);
  if(!r.rowCount)return reply.code(404).send({error:"Product not found"});return {product:r.rows[0]};
 });
-app.post("/api/orders",async(req,reply)=>{
+app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req); const body=z.object({items:z.array(z.object({productId:z.string().uuid(),quantity:z.number().int().min(1).max(100)})).min(1).max(100)}).parse(req.body);
  const order=await withTransaction(async(c)=>{
   const bps=Math.max(0,Math.min(10000,Number(process.env.PLATFORM_COMMISSION_BPS||500)));
@@ -278,7 +289,7 @@ app.post("/api/seller/products",async(req,reply)=>{
  });
  return reply.code(201).send({product});
 });
-app.post("/api/orders/:id/payment",async(req,reply)=>{
+app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const order=(await pool.query(`select o.id,o.total_minor,o.currency,o.status,o.buyer_id,coalesce(min(oi.title_snapshot),'Заказ ЧИПОК') as first_title from orders o left join seller_orders so on so.order_id=o.id left join order_items oi on oi.seller_order_id=so.id where o.id=$1 group by o.id`,[id])).rows[0];
  if(!order||order.buyer_id!==buyer.id)return reply.code(404).send({error:"Order not found"});
