@@ -1,15 +1,15 @@
 "use client";
-import {useMemo,useState} from "react";
+import {useMemo,useState,useEffect} from "react";
 type P={id:string;title:string;price:number;seller:string;rating:number;reviews:number;category:string;image:string};
-const ps:P[]=[
-{id:"1",title:"Тактический рюкзак 35 л",price:4990,seller:"TacticalStore",rating:4.8,reviews:124,category:"Одежда",image:"https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=85"},
-{id:"2",title:"Худи оверсайз",price:2490,seller:"UrbanWear",rating:4.7,reviews:89,category:"Одежда",image:"https://images.unsplash.com/photo-1556821840-3a63f95609a7?auto=format&fit=crop&w=900&q=85"},
-{id:"3",title:"Беспроводные наушники",price:3990,seller:"TechZone",rating:4.9,reviews:210,category:"Электроника",image:"https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1?auto=format&fit=crop&w=900&q=85"},
-{id:"4",title:"Туристический стул",price:1990,seller:"OutdoorLife",rating:4.6,reviews:72,category:"Дом",image:"https://images.unsplash.com/photo-1598301257982-0cf014dabbcd?auto=format&fit=crop&w=900&q=85"}];
+declare global {interface Window{Telegram?:{WebApp?:{ready:()=>void;expand:()=>void;openInvoice?:(url:string,cb?:(status:string)=>void)=>void;initData?:string}}}}\nconst ps:P[]=[
+{id:"30000000-0000-4000-8000-000000000001",title:"Тактический рюкзак 35 л",price:4990,seller:"TacticalStore",rating:4.8,reviews:124,category:"Одежда",image:"https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=85"},
+{id:"30000000-0000-4000-8000-000000000002",title:"Худи оверсайз",price:2490,seller:"UrbanWear",rating:4.7,reviews:89,category:"Одежда",image:"https://images.unsplash.com/photo-1556821840-3a63f95609a7?auto=format&fit=crop&w=900&q=85"},
+{id:"30000000-0000-4000-8000-000000000003",title:"Беспроводные наушники",price:3990,seller:"TechZone",rating:4.9,reviews:210,category:"Электроника",image:"https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1?auto=format&fit=crop&w=900&q=85"},
+{id:"30000000-0000-4000-8000-000000000004",title:"Туристический стул",price:1990,seller:"OutdoorLife",rating:4.6,reviews:72,category:"Дом",image:"https://images.unsplash.com/photo-1598301257982-0cf014dabbcd?auto=format&fit=crop&w=900&q=85"}];
 const cats=["Все","Еда","Одежда","Электроника","Дом"];
 const rub=(n:number)=>new Intl.NumberFormat("ru-RU").format(n)+" ₽";
 export default function Home(){
-const [tab,setTab]=useState("home"),[cat,setCat]=useState("Все"),[q,setQ]=useState(""),[cart,setCart]=useState<P[]>([]),[selected,setSelected]=useState<P|null>(null);
+const [tab,setTab]=useState("home"),[cat,setCat]=useState("Все"),[q,setQ]=useState(""),[cart,setCart]=useState<P[]>([]),[selected,setSelected]=useState<P|null>(null); useEffect(()=>{window.Telegram?.WebApp?.ready();window.Telegram?.WebApp?.expand()},[]);
 const items=useMemo(()=>ps.filter(p=>(cat==="Все"||p.category===cat)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[cat,q]);
 if(selected)return <div className="app"><main className="shell detail"><button className="icon-btn back" onClick={()=>setSelected(null)}>←</button><div className="detail-image"><img src={selected.image} alt={selected.title}/></div><h1>{selected.title}</h1><div className="rating"><b>★ {selected.rating}</b> ({selected.reviews} отзыва)</div><div className="seller">♙ {selected.seller}</div><div className="price">{rub(selected.price)}</div><div className="meta"><div>Наличие<b>В наличии</b></div><div>Формат<b>Самовывоз</b></div><div>Комиссия<b>5% с продавца</b></div></div><button className="primary wide" onClick={()=>{setCart([...cart,selected]);setSelected(null)}}>Добавить в корзину</button></main></div>;
 const total=cart.reduce((s,p)=>s+p.price,0);
