@@ -1,1 +1,1 @@
-{"name":"@chipok/shared","private":true,"version":"0.1.0","types":"src/index.ts"}
+{"name":"@chipok/shared","private":true,"version":"0.1.0","types":"src/index.ts","scripts":{"typecheck":"tsc --noEmit"}}
