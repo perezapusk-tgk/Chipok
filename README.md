@@ -18,3 +18,6 @@ Telegram Mini App marketplace.
 - No delivery in v1
 - Fulfillment: meeting or pickup
 - No subscriptions or seller plans
+
+## CI
+GitHub Actions runs typecheck and build on pushes to main and pull requests.
