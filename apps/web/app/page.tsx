@@ -34,7 +34,7 @@ const api=()=>process.env.NEXT_PUBLIC_API_URL||"http://localhost:3001";
 export default function Home(){
  const [tab,setTab]=useState("home"),[cat,setCat]=useState("Все"),[q,setQ]=useState("");
  const [cart,setCart]=useState<Product[]>([]),[selected,setSelected]=useState<Product|null>(null);
- const [products,setProducts]=useState<Product[]>(fallback),[orders,setOrders]=useState<Order[]>([]),[user,setUser]=useState<User|null>(null),[categories,setCategories]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]);
+ const [products,setProducts]=useState<Product[]>(process.env.NODE_ENV==="production"?[]:fallback),[orders,setOrders]=useState<Order[]>([]),[user,setUser]=useState<User|null>(null),[categories,setCategories]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]);
  const [sellerProducts,setSellerProducts]=useState<any[]>([]),[loading,setLoading]=useState(false),[message,setMessage]=useState("");
  const tg=typeof window!=="undefined"?window.Telegram?.WebApp:null;
  const authHeaders=():Record<string,string>=>{const initData=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";const headers:Record<string,string>={};if(initData)headers.Authorization="tma "+initData;return headers;};
@@ -47,7 +47,7 @@ export default function Home(){
      const cr=await fetch(api()+"/api/categories"); if(cr.ok){const d=await cr.json();setCategories(d.items||[])}
      await loadFavorites();
      await loadNotifications();
-   }catch{}
+   }catch{if(process.env.NODE_ENV==="production")setProducts([])}
  }
  async function loadOrders(){const r=await fetch(api()+"/api/orders",{headers:authHeaders()});if(r.ok)setOrders((await r.json()).items||[])}
  async function loadNotifications(){const r=await fetch(api()+"/api/notifications",{headers:authHeaders()});if(r.ok)setNotifications((await r.json()).items||[])}
