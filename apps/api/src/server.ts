@@ -73,6 +73,21 @@ app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
  return result;
 });
 
+app.post("/api/seller-orders/:id/ready",async(req,reply)=>{
+ const seller=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
+ const result=await withTransaction(async(c)=>{
+  const so=(await c.query("select so.*,o.id as order_id,o.buyer_id from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
+  if(!so)return null;
+  if(so.status!=="seller_confirmed")throw Object.assign(new Error("Сначала подтвердите наличие заказа"),{statusCode:409});
+  await c.query("update seller_orders set status='ready_for_handover' where id=$1",[id]);
+  const pending=await c.query("select count(*)::int as n from seller_orders where order_id=$1 and status not in ('ready_for_handover','completed')",[so.order_id]);
+  if(Number(pending.rows[0].n)===0)await c.query("update orders set status='ready_for_handover',updated_at=now() where id=$1",[so.order_id]);
+  await c.query("insert into notifications(user_id,type,title,body) values($1,'order_ready','Заказ готов к получению','Покажи продавцу код получения из раздела «Заказы».')",[so.buyer_id]);
+  return {sellerOrderId:id,orderId:so.order_id,status:"ready_for_handover"};
+ });
+ if(!result)return reply.code(404).send({error:"Seller order not found"});
+ return result;
+});
 app.get("/api/orders/:id/handover",async(req,reply)=>{
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const r=await pool.query("select so.id as seller_order_id,so.seller_id,so.status,h.created_at,h.used_at,h.code_encrypted from seller_orders so join orders o on o.id=so.order_id left join handover_codes h on h.seller_order_id=so.id where so.order_id=$1 and o.buyer_id=$2 order by so.created_at",[id,buyer.id]);
@@ -86,7 +101,7 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
  const result=await withTransaction(async(c)=>{
   const so=(await c.query("select so.*,o.id as order_id,o.buyer_id from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
   if(!so)return null;
-  if(!["seller_confirmed","ready_for_handover"].includes(so.status))throw Object.assign(new Error("Order is not ready for handover"),{statusCode:409});
+  if(so.status!=="ready_for_handover")throw Object.assign(new Error("Order is not ready for handover"),{statusCode:409});
   const h=(await c.query("select * from handover_codes where seller_order_id=$1 for update",[id])).rows[0];
   if(!h||h.used_at||hashHandover(body.code)!==h.code_hash)throw Object.assign(new Error("Invalid handover code"),{statusCode:403});
   await c.query("update handover_codes set used_at=now() where id=$1",[h.id]);
