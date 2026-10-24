@@ -342,7 +342,7 @@ app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders(
  return {invoiceLink};
 });
 app.post("/api/payments/telegram/webhook",async(req,reply)=>{
- const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;if(secret&&req.headers["x-telegram-bot-api-secret-token"]!==secret)return reply.code(401).send({error:"Unauthorized"});
+ const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;if(!secret)return reply.code(503).send({error:"Payment webhook secret is not configured"});if(req.headers["x-telegram-bot-api-secret-token"]!==secret)return reply.code(401).send({error:"Unauthorized"});
  const update:any=req.body;
  if(update.pre_checkout_query){
   const q=update.pre_checkout_query;const payment=(await pool.query(`select p.amount_minor,p.currency,o.status from payments p join orders o on o.id=p.order_id where p.payload=$1`,[q.invoice_payload])).rows[0];
@@ -355,7 +355,7 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
    const p=(await c.query(`select p.*,o.buyer_id,o.status as order_status from payments p join orders o on o.id=p.order_id where p.payload=$1 for update`,[payload])).rows[0];if(!p||p.order_status!=="created")return;
    const u=(await c.query("select id from users where telegram_id=$1",[update.message.from?.id])).rows[0];if(!u||u.id!==p.buyer_id)throw new Error("Payment buyer mismatch");
    if(Number(p.amount_minor)!==Number(sp.total_amount)||p.currency!==sp.currency)throw new Error("Payment amount mismatch");
-   const eventId=String(sp.telegram_payment_charge_id||sp.provider_payment_charge_id);
+   const eventId=String(sp.telegram_payment_charge_id||sp.provider_payment_charge_id||"");if(!eventId)throw new Error("Missing payment event id");
    const inserted=await c.query(`insert into payment_transactions(payment_id,idempotency_key,provider_event_id,event_type,payload) values($1,$2,$3,'successful_payment',$4) on conflict(idempotency_key) do nothing`,[p.id,`telegram:${eventId}`,eventId,sp]);if(!inserted.rowCount)return;
    await c.query("update payments set status='paid',provider_payment_id=$1,telegram_charge_id=$2,provider_charge_id=$3,updated_at=now() where id=$4",[sp.provider_payment_charge_id||null,sp.telegram_payment_charge_id||null,sp.provider_payment_charge_id||null,p.id]);
    await c.query("update orders set status='paid',updated_at=now() where id=$1",[p.order_id]);
