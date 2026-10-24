@@ -137,7 +137,7 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
    await c.query("update orders set status='paid',updated_at=now() where id=$1",[p.order_id]);
    await c.query("update seller_orders set status='paid' where order_id=$1",[p.order_id]);
    const sellers=await c.query("select seller_id,seller_amount_minor,platform_fee_minor,currency from seller_orders where order_id=$1",[p.order_id]);
-   for(const s of sellers.rows){await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'sale',$3,$4,'Продажа через ЧИПОК'),($1,$2,'commission',-$5,$4,'Комиссия ЧИПОК 5%')",[s.seller_id,p.order_id,s.seller_amount_minor,s.currency,s.platform_fee_minor]);}
+   for(const s of sellers.rows){await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'sale',$3,$4,'Продажа через ЧИПОК'),($1,$2,'commission',-$5,$4,'Комиссия ЧИПОК')",[s.seller_id,p.order_id,Number(s.seller_amount_minor)+Number(s.platform_fee_minor),s.currency,s.platform_fee_minor]);}
    const fee=(await c.query("select platform_fee_minor,currency from orders where id=$1",[p.order_id])).rows[0];await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия ЧИПОК')",[p.order_id,fee.platform_fee_minor,fee.currency]);
   });
  }
