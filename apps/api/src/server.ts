@@ -238,7 +238,9 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
     await c.query("update orders set status='refunded',updated_at=now() where id=$1",[d.order_id]);
    }
   } else {
-   await c.query("update orders set status='completed',updated_at=now() where id=$1",[d.order_id]);
+   const previous=(await c.query("select status from orders where id=$1 for update",[d.order_id])).rows[0];
+   const restored=["disputed","completed"].includes(previous?.status)?"completed":previous?.status||"completed";
+   await c.query("update orders set status=$1,updated_at=now() where id=$2",[restored,d.order_id]);
   }
   await c.query("insert into admin_actions(admin_id,action,target_type,target_id,metadata) values($1,$2,$3,$4,$5)",[admin.id,"resolve_dispute","dispute",id,JSON.stringify({resolution:body.resolution,note:body.note||null})]);
   return {id,status:"resolved",resolution:body.resolution};
