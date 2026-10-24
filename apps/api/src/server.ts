@@ -214,8 +214,30 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
  const result=await withTransaction(async(c)=>{
   const d=(await c.query("select * from disputes where id=$1 for update",[id])).rows[0];if(!d)return null;
   await c.query("update disputes set status='resolved',resolved_at=now() where id=$1",[id]);
-  if(body.resolution==="refund")await c.query("update orders set status='refunded',updated_at=now() where id=$1",[d.order_id]);
-  else await c.query("update orders set status='completed',updated_at=now() where id=$1",[d.order_id]);
+  if(body.resolution==="refund"){
+   const order=(await c.query("select total_minor,currency,status from orders where id=$1 for update",[d.order_id])).rows[0];
+   if(!order)throw Object.assign(new Error("Order not found"),{statusCode:404});
+   if(!["refunded","cancelled"].includes(order.status)){
+    const sellerRows=(await c.query("select seller_id,seller_amount_minor,platform_fee_minor,currency,status from seller_orders where order_id=$1 for update",[d.order_id])).rows;
+    for(const so of sellerRows){
+      if(so.status!=="completed")await c.query("update inventory i set reserved=greatest(0,i.reserved-oi.quantity),updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[d.order_id]);
+      const saleExists=await c.query("select 1 from ledger_entries where order_id=$1 and seller_id=$2 and type='sale' limit 1",[d.order_id,so.seller_id]);
+      if(saleExists.rowCount){
+        const refundExists=await c.query("select 1 from ledger_entries where order_id=$1 and seller_id=$2 and type='refund' limit 1",[d.order_id,so.seller_id]);
+        if(!refundExists.rowCount)await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'refund',$3,$4,'Возврат по спору')",[so.seller_id,d.order_id,-Number(so.seller_amount_minor),so.currency]);
+      }
+    }
+    const feeRows=await c.query("select amount_minor,currency from platform_ledger_entries where order_id=$1 and type='commission' limit 1",[d.order_id]);
+    if(feeRows.rowCount){
+      const exists=await c.query("select 1 from platform_ledger_entries where order_id=$1 and type='refund' limit 1",[d.order_id]);
+      if(!exists.rowCount)await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'refund',$2,$3,'Возврат комиссии ЧИПОК')",[d.order_id,-Number(feeRows.rows[0].amount_minor),feeRows.rows[0].currency]);
+    }
+    await c.query("update seller_orders set status='refunded' where order_id=$1 and status<>'completed'",[d.order_id]);
+    await c.query("update orders set status='refunded',updated_at=now() where id=$1",[d.order_id]);
+   }
+  } else {
+   await c.query("update orders set status='completed',updated_at=now() where id=$1",[d.order_id]);
+  }
   await c.query("insert into admin_actions(admin_id,action,target_type,target_id,metadata) values($1,$2,$3,$4,$5)",[admin.id,"resolve_dispute","dispute",id,JSON.stringify({resolution:body.resolution,note:body.note||null})]);
   return {id,status:"resolved",resolution:body.resolution};
  });
