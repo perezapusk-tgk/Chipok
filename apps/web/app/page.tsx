@@ -85,15 +85,107 @@ function Card({p,open,add,toggleFavorite}:{p:Product;open:()=>void;add:()=>void;
 
 function Cart({cart,total,checkout,loading}:{cart:Product[];total:number;checkout:()=>void;loading:boolean}){return <div className="hero"><h1>Корзина</h1>{!cart.length?<p>Корзина пуста. Добавь товары из каталога.</p>:cart.map((p,i)=><div className="row" key={i} style={{padding:"12px 0",borderBottom:"1px solid #20323b"}}><img src={p.image||p.image_url||""} alt="" width="54" height="54" style={{borderRadius:12,objectFit:"cover"}}/><div style={{flex:1}}><b style={{fontSize:12}}>{p.title}</b><div className="small">{p.seller||"Продавец"}</div></div><b>{money(p.price_minor??Math.round((p.price||0)*100),p.currency)}</b></div>)}{cart.length>0&&<><p className="small">Комиссия ЧИПОК 5% удерживается из суммы продавца, а не добавляется покупателю.</p><h2>Итого {money(total,"RUB")}</h2><button className="primary wide" onClick={checkout} disabled={loading}>{loading?"Создаём оплату…":"Оформить и оплатить в Telegram"}</button></>}</div>}
 
-function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}){
- const [active,setActive]=useState<Order|null>(null); const [handover,setHandover]=useState<any[]>([]); const [dispute,setDispute]=useState(false); const [reason,setReason]=useState("other"); const [description,setDescription]=useState(""); const [busy,setBusy]=useState(false); const [localMessage,setLocalMessage]=useState(""); const [reviewItem,setReviewItem]=useState<any>(null); const [reviewRating,setReviewRating]=useState(5); const [reviewText,setReviewText]=useState("");
+function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}) {
+ const [active,setActive]=useState<Order|null>(null);
+ const [handover,setHandover]=useState<any[]>([]);
+ const [dispute,setDispute]=useState(false);
+ const [reason,setReason]=useState("other");
+ const [description,setDescription]=useState("");
+ const [busy,setBusy]=useState(false);
+ const [localMessage,setLocalMessage]=useState("");
+ const [reviewItem,setReviewItem]=useState<any>(null);
+ const [reviewRating,setReviewRating]=useState(5);
+ const [reviewText,setReviewText]=useState("");
+
  useEffect(()=>{onLoad()},[]);
- async function openOrder(o:Order){setActive(o);setDispute(false);const r=await fetch(api()+"/api/orders/"+o.id+"/handover",{headers:{Authorization:"tma "+(typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"")}});if(r.ok)setHandover((await r.json()).items||[]);}
- async function sendReview(){if(!reviewItem)return;setBusy(true);try{const r=await fetch(api()+"/api/reviews",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+(typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"")},body:JSON.stringify({orderItemId:reviewItem.id,rating:reviewRating,text:reviewText.trim()||undefined})});if(!r.ok)throw new Error((await r.json()).error||"Не удалось сохранить отзыв");setReviewItem(null);setReviewText("");setLocalMessage("Отзыв сохранён.");}catch(e){setLocalMessage(e instanceof Error?e.message:"Ошибка")}finally{setBusy(false)}}
- async function sendDispute(){if(!active||description.trim().length<5)return;setBusy(true);try{const r=await fetch(api()+"/api/disputes",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+(typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"")},body:JSON.stringify({orderId:active.id,reason,description:description.trim()})});if(!r.ok)throw new Error((await r.json()).error||"Не удалось открыть спор");setDispute(false);setDescription("");onLoad();setLocalMessage("Спор открыт. Администратор рассмотрит заказ.");}catch(e){setLocalMessage(e instanceof Error?e.message:"Ошибка")}finally{setBusy(false)}}
- if(active)return <div className="hero">{localMessage&&<p className="small">{localMessage}</p>}<button className="icon-btn" onClick={()=>setActive(null)}>←</button><h1>Заказ #{active.id.slice(0,8)}</h1><div className="order-status">{statusRu(active.status)}</div><div className="order-total">{money(Number(active.total_minor),active.currency)}</div><div className="small">{new Date(active.created_at).toLocaleString("ru-RU")}</div><div className="menu review-list">{(active.seller_orders||[]).filter((so:any)=>so.status==="completed").flatMap((so:any)=>so.items||[]).map((item:any)=><div className="order-seller" key={item.id}><span>{item.title} × {item.quantity}</span><button className="secondary mini" onClick={()=>{setReviewItem(item);setReviewRating(5)}}>Оставить отзыв</button></div>)}</div>{reviewItem&&<><div className="form-card"><b>Отзыв: {reviewItem.title}</b><select value={reviewRating} onChange={e=>setReviewRating(Number(e.target.value))}><option value="5">★★★★★</option><option value="4">★★★★☆</option><option value="3">★★★☆☆</option><option value="2">★★☆☆☆</option><option value="1">★☆☆☆☆</option></select><textarea value={reviewText} onChange={e=>setReviewText(e.target.value)} placeholder="Комментарий (необязательно)" rows={3}/><button className="primary wide" disabled={busy} onClick={sendReview}>{busy?"Сохраняем…":"Опубликовать отзыв"}</button></div></div><div className="menu order-sellers">{(active.seller_orders||[]).map((so:any)=><div className="order-seller" key={so.id}><b>{statusRu(so.status)}</b><span>{so.fulfillment_type==="meeting"?"Встреча":"Самовывоз"} · {money(Number(so.seller_amount_minor),active.currency)}</span>{so.status==="ready_for_handover"&&handover.find(h=>h.seller_order_id===so.id)?.handoverCode&&<div className="handover-code"><span>Код получения</span><strong>{handover.find(h=>h.seller_order_id===so.id).handoverCode}</strong><small>Покажи этот код продавцу при получении.</small></div>}</div>)}</div>{!["cancelled","refunded","disputed"].includes(active.status)&&<><button className="secondary wide" onClick={()=>setDispute(true)}>Проблема с заказом</button>{dispute&&<div className="form-card"><select value={reason} onChange={e=>setReason(e.target.value)}><option value="missing">Не получил заказ</option><option value="wrong_item">Не тот товар</option><option value="damaged">Товар повреждён</option><option value="not_as_described">Не соответствует описанию</option><option value="other">Другое</option></select><textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Опиши проблему" rows={4}/><button className="primary wide" disabled={busy||description.trim().length<5} onClick={sendDispute}>{busy?"Отправляем…":"Открыть спор"}</button></div>}</>}</div>;
-  if(active)return <div className="hero">{localMessage&&<p className="small">{localMessage}</p>}<button className="icon-btn" onClick={()=>setActive(null)}>←</button><h1>Заказ #{active.id.slice(0,8)}</h1><div className="order-status">{statusRu(active.status)}</div><div className="order-total">{money(Number(active.total_minor),active.currency)}</div><div className="small">{new Date(active.created_at).toLocaleString("ru-RU")}</div><div className="menu order-sellers">{(active.seller_orders||[]).map((so:any)=><div className="order-seller" key={so.id}><b>{statusRu(so.status)}</b><span>{so.fulfillment_type==="meeting"?"Встреча":"Самовывоз"} · {money(Number(so.seller_amount_minor),active.currency)}</span>{so.status==="completed"&&(so.items||[]).map((item:any)=><div className="review-list" key={item.id}><span>{item.title} × {item.quantity}</span><button className="secondary mini" onClick={()=>{setReviewItem(item);setReviewRating(5)}}>Оставить отзыв</button></div>)}{so.status==="ready_for_handover"&&handover.find(h=>h.seller_order_id===so.id)?.handoverCode&&<div className="handover-code"><span>Код получения</span><strong>{handover.find(h=>h.seller_order_id===so.id).handoverCode}</strong><small>Покажи этот код продавцу при получении.</small></div>}</div>)}</div>{reviewItem&&<div className="form-card"><b>Отзыв: {reviewItem.title}</b><select value={reviewRating} onChange={e=>setReviewRating(Number(e.target.value))}><option value="5">★★★★★</option><option value="4">★★★★☆</option><option value="3">★★★☆☆</option><option value="2">★★☆☆☆</option><option value="1">★☆☆☆☆</option></select><textarea value={reviewText} onChange={e=>setReviewText(e.target.value)} placeholder="Комментарий (необязательно)" rows={3}/><button className="primary wide" disabled={busy} onClick={sendReview}>{busy?"Сохраняем…":"Опубликовать отзыв"}</button></div>}{!["cancelled","refunded","disputed"].includes(active.status)&&<><button className="secondary wide" onClick={()=>setDispute(true)}>Проблема с заказом</button>{dispute&&<div className="form-card"><select value={reason} onChange={e=>setReason(e.target.value)}><option value="missing">Не получил заказ</option><option value="wrong_item">Не тот товар</option><option value="damaged">Товар повреждён</option><option value="not_as_described">Не соответствует описанию</option><option value="other">Другое</option></select><textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Опиши проблему" rows={4}/><button className="primary wide" disabled={busy||description.trim().length<5} onClick={sendDispute}>{busy?"Отправляем…":"Открыть спор"}</button></div>}</>}</div>
+
+ async function openOrder(o:Order){
+   setActive(o); setDispute(false); setLocalMessage("");
+   const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
+   const r=await fetch(api()+"/api/orders/"+o.id+"/handover",{headers:{Authorization:"tma "+init}});
+   if(r.ok)setHandover((await r.json()).items||[]);
+ }
+
+ async function sendReview(){
+   if(!reviewItem)return;
+   setBusy(true);
+   try{
+     const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
+     const r=await fetch(api()+"/api/reviews",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init},body:JSON.stringify({orderItemId:reviewItem.id,rating:reviewRating,text:reviewText.trim()||undefined})});
+     if(!r.ok)throw new Error((await r.json()).error||"Не удалось сохранить отзыв");
+     setReviewItem(null);setReviewText("");setLocalMessage("Отзыв сохранён.");
+   }catch(e){setLocalMessage(e instanceof Error?e.message:"Ошибка")}
+   finally{setBusy(false)}
+ }
+
+ async function sendDispute(){
+   if(!active||description.trim().length<5)return;
+   setBusy(true);
+   try{
+     const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
+     const r=await fetch(api()+"/api/disputes",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init},body:JSON.stringify({orderId:active.id,reason,description:description.trim()})});
+     if(!r.ok)throw new Error((await r.json()).error||"Не удалось открыть спор");
+     setDispute(false);setDescription("");onLoad();setLocalMessage("Спор открыт. Администратор рассмотрит заказ.");
+   }catch(e){setLocalMessage(e instanceof Error?e.message:"Ошибка")}
+   finally{setBusy(false)}
+ }
+
+ if(active) return <div className="hero">
+   {localMessage&&<p className="small">{localMessage}</p>}
+   <button className="icon-btn" onClick={()=>setActive(null)}>←</button>
+   <h1>Заказ #{active.id.slice(0,8)}</h1>
+   <div className="order-status">{statusRu(active.status)}</div>
+   <div className="order-total">{money(Number(active.total_minor),active.currency)}</div>
+   <div className="small">{new Date(active.created_at).toLocaleString("ru-RU")}</div>
+
+   <div className="menu order-sellers">
+     {(active.seller_orders||[]).map((so:any)=><div className="order-seller" key={so.id}>
+       <b>{statusRu(so.status)}</b>
+       <span>{so.fulfillment_type==="meeting"?"Встреча":"Самовывоз"} · {money(Number(so.seller_amount_minor),active.currency)}</span>
+       {so.status==="completed"&&(so.items||[]).map((item:any)=><div className="review-list" key={item.id}>
+         <span>{item.title} × {item.quantity}</span>
+         <button className="secondary mini" onClick={()=>{setReviewItem(item);setReviewRating(5)}}>Оставить отзыв</button>
+       </div>)}
+       {so.status==="ready_for_handover"&&handover.find(h=>h.seller_order_id===so.id)?.handoverCode&&<div className="handover-code">
+         <span>Код получения</span>
+         <strong>{handover.find(h=>h.seller_order_id===so.id).handoverCode}</strong>
+         <small>Покажи этот код продавцу при получении.</small>
+       </div>}
+     </div>)}
+   </div>
+
+   {reviewItem&&<div className="form-card">
+     <b>Отзыв: {reviewItem.title}</b>
+     <select value={reviewRating} onChange={e=>setReviewRating(Number(e.target.value))}>
+       <option value="5">★★★★★</option><option value="4">★★★★☆</option><option value="3">★★★☆☆</option><option value="2">★★☆☆☆</option><option value="1">★☆☆☆☆</option>
+     </select>
+     <textarea value={reviewText} onChange={e=>setReviewText(e.target.value)} placeholder="Комментарий (необязательно)" rows={3}/>
+     <button className="primary wide" disabled={busy} onClick={sendReview}>{busy?"Сохраняем…":"Опубликовать отзыв"}</button>
+   </div>}
+
+   {!["cancelled","refunded","disputed"].includes(active.status)&&<>
+     <button className="secondary wide" onClick={()=>setDispute(true)}>Проблема с заказом</button>
+     {dispute&&<div className="form-card">
+       <select value={reason} onChange={e=>setReason(e.target.value)}>
+         <option value="missing">Не получил заказ</option><option value="wrong_item">Не тот товар</option><option value="damaged">Товар повреждён</option><option value="not_as_described">Не соответствует описанию</option><option value="other">Другое</option>
+       </select>
+       <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Опиши проблему" rows={4}/>
+       <button className="primary wide" disabled={busy||description.trim().length<5} onClick={sendDispute}>{busy?"Отправляем…":"Открыть спор"}</button>
+     </div>}
+   </>}
+ </div>;
+
+ return <div className="hero">
+   <h1>Заказы</h1>
+   {!orders.length?<p>Заказов пока нет.</p>:<div className="menu">
+     {orders.map(o=><button key={o.id} onClick={()=>openOrder(o)}>
+       <span>#{o.id.slice(0,8)} · {statusRu(o.status)}</span>
+       <span>{money(Number(o.total_minor),o.currency)} ›</span>
+     </button>)}
+   </div>}
+ </div>;
 }
+
 function statusRu(s:string){return ({created:"Ожидает оплаты",paid:"Оплачен",seller_confirmed:"Продавец подтвердил",ready_for_handover:"Готов к получению",completed:"Завершён",cancelled:"Отменён",refunded:"Возврат",disputed:"Спор"} as Record<string,string>)[s]||s}
 
 function Profile({user,sellerProducts,loadSeller,setMessage}:{user:User|null;sellerProducts:any[];loadSeller:()=>void;setMessage:(s:string)=>void}){
