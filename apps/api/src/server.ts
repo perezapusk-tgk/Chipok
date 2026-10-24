@@ -11,6 +11,7 @@ function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missin
 const rateBuckets=new Map<string,{count:number;reset:number}>();
 function rateLimit(key:string,limit=60,windowMs=60_000){const now=Date.now();const cur=rateBuckets.get(key);if(!cur||cur.reset<=now){rateBuckets.set(key,{count:1,reset:now+windowMs});return true}if(cur.count>=limit)return false;cur.count++;return true}
 setInterval(()=>{const now=Date.now();for(const [k,v] of rateBuckets)if(v.reset<=now)rateBuckets.delete(k)},60_000).unref();
+setInterval(()=>{expireUnpaidOrders().catch(error=>app.log.error(error,"Failed to expire unpaid orders"))},60_000).unref();
 app.addHook("onRequest",async(req,reply)=>{const key=`${req.ip}:${req.method}:${req.url.split("?")[0]}`;if(!rateLimit(key)){reply.header("Retry-After","60");return reply.code(429).send({error:"Слишком много запросов. Попробуйте позже."})}});
 
 function reliabilityLevel(score:number){if(score<50)return "blocked";if(score<60)return "restricted";if(score<80)return "warning";return "stable"}
@@ -23,7 +24,9 @@ async function expireUnpaidOrders(){
   if(!expired.length)return;
   await c.query("update inventory i set reserved=greatest(0,i.reserved-oi.quantity),updated_at=now() from order_items oi join seller_orders so on so.id=oi.seller_order_id where so.order_id=any($1::uuid[]) and so.status='created' and oi.product_id=i.product_id",[expired]);
   await c.query("update seller_orders set status='cancelled' where order_id=any($1::uuid[]) and status='created'",[expired]);
+  await c.query("update payments set status='expired',updated_at=now() where order_id=any($1::uuid[]) and status='pending'",[expired]);
   await c.query("update orders set status='cancelled',updated_at=now() where id=any($1::uuid[]) and status='created'",[expired]);
+  await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'order_expired','Заказ отменён','Время ожидания оплаты истекло, резерв товара снят.' from orders where id=any($1::uuid[])",[expired]);
  });
 }
 function encryptHandover(code:string){const iv=Buffer.from(randomUUID().replace(/-/g,"").slice(0,24),"hex");const cipher=createCipheriv("aes-256-gcm",handoverKey(),iv);const data=Buffer.concat([cipher.update(code,"utf8"),cipher.final()]);return iv.toString("hex")+":"+cipher.getAuthTag().toString("hex")+":"+data.toString("hex")}
@@ -360,6 +363,7 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
    await c.query("update payments set status='paid',provider_payment_id=$1,telegram_charge_id=$2,provider_charge_id=$3,updated_at=now() where id=$4",[sp.provider_payment_charge_id||null,sp.telegram_payment_charge_id||null,sp.provider_payment_charge_id||null,p.id]);
    await c.query("update orders set status='paid',updated_at=now() where id=$1",[p.order_id]);
    await c.query("update seller_orders set status='paid' where order_id=$1",[p.order_id]);
+   await c.query("insert into notifications(user_id,type,title,body) select seller_id,'order_paid','Новый оплаченный заказ','Покупатель оплатил заказ. Проверьте наличие товара и подтвердите заказ.' from seller_orders where order_id=$1",[p.order_id]);
    const fee=(await c.query("select platform_fee_minor,currency from orders where id=$1",[p.order_id])).rows[0];
    await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия ЧИПОК') on conflict do nothing",[p.order_id,fee.platform_fee_minor,fee.currency]);
   });
