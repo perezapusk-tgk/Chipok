@@ -201,7 +201,7 @@ app.get("/api/admin/orders",async(req,reply)=>{
  const r=await pool.query(`select o.id,o.status,o.total_minor,o.currency,o.platform_fee_minor,o.created_at,
  count(distinct so.id)::int as seller_orders
  from orders o left join seller_orders so on so.order_id=o.id${where}
- group by o.id order by o.created_at desc limit ${values.length}`,values);
+ group by o.id order by o.created_at desc limit $${values.length}`,values);
  return {items:r.rows};
 });
 app.get("/api/admin/disputes",async(req,reply)=>{
