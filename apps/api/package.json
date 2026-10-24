@@ -1,0 +1,1 @@
+{"name":"@chipok/api","private":true,"scripts":{"dev":"tsx src/server.ts","build":"tsc","typecheck":"tsc --noEmit"},"dependencies":{"fastify":"latest","@fastify/cors":"latest","zod":"latest"},"devDependencies":{"tsx":"latest","typescript":"latest"}}
