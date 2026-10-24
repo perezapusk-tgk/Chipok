@@ -31,6 +31,12 @@ async function expireUnpaidOrders(){
   await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'order_expired','Заказ отменён','Время ожидания оплаты истекло, резерв товара снят.' from orders where id=any($1::uuid[])",[expired]);
  });
 }
+app.post("/internal/maintenance/expire-orders",async(req,reply)=>{
+ const secret=process.env.MAINTENANCE_CRON_SECRET;
+ if(!secret||req.headers.authorization!==`Bearer ${secret}`)return reply.code(401).send({error:"Unauthorized"});
+ await expireUnpaidOrders();
+ return {ok:true};
+});
 function encryptHandover(code:string){const iv=Buffer.from(randomUUID().replace(/-/g,"").slice(0,24),"hex");const cipher=createCipheriv("aes-256-gcm",handoverKey(),iv);const data=Buffer.concat([cipher.update(code,"utf8"),cipher.final()]);return iv.toString("hex")+":"+cipher.getAuthTag().toString("hex")+":"+data.toString("hex")}
 function decryptHandover(value:string){const [ivHex,tagHex,dataHex]=value.split(":");const decipher=createDecipheriv("aes-256-gcm",handoverKey(),Buffer.from(ivHex,"hex"));decipher.setAuthTag(Buffer.from(tagHex,"hex"));return Buffer.concat([decipher.update(Buffer.from(dataHex,"hex")),decipher.final()]).toString("utf8")}
 async function auth(request:any){
