@@ -139,10 +139,12 @@ app.post("/api/seller/payouts",async(req,reply)=>{
  const seller=await auth(req); if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
  const body=z.object({amountMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB")}).parse(req.body);
  const result=await withTransaction(async(c)=>{
-  const available=await c.query("select coalesce(sum(case when type='sale' then amount_minor when type in ('commission','payout') then amount_minor else 0 end),0)::bigint as n from ledger_entries where seller_id=$1",[seller.id]);
+  await c.query("select id from users where id=$1 for update",[seller.id]);
+  const currency=body.currency.toUpperCase();
+  if(currency!=="RUB")throw Object.assign(new Error("Only RUB payouts are supported"),{statusCode:400});
+  const available=await c.query("select coalesce(sum(case when type='sale' then amount_minor when type in ('commission','payout') then amount_minor else 0 end),0)::bigint as n from ledger_entries where seller_id=$1 and currency=$2",[seller.id,currency]);
   const amount=Number(available.rows[0].n);
   if(body.amountMinor>amount)throw Object.assign(new Error("Insufficient available balance"),{statusCode:409});
-  const currency=body.currency.toUpperCase();
   const p=(await c.query("insert into payouts(seller_id,amount_minor,currency,status) values($1,$2,$3,'pending') returning *",[seller.id,body.amountMinor,currency])).rows[0];
   await c.query("insert into ledger_entries(seller_id,type,amount_minor,currency,description) values($1,'payout',$2,$3,'Заявка на вывод средств')",[seller.id,-body.amountMinor,currency]);
   await c.query("insert into notifications(user_id,type,title,body) values($1,'payout_pending','Заявка на вывод','Заявка на вывод средств создана и ожидает обработки')",[seller.id]);
