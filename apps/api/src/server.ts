@@ -142,8 +142,10 @@ app.post("/api/seller/payouts",async(req,reply)=>{
   const available=await c.query("select coalesce(sum(case when type='sale' then amount_minor when type in ('commission','payout') then amount_minor else 0 end),0)::bigint as n from ledger_entries where seller_id=$1",[seller.id]);
   const amount=Number(available.rows[0].n);
   if(body.amountMinor>amount)throw Object.assign(new Error("Insufficient available balance"),{statusCode:409});
-  const p=(await c.query("insert into payouts(seller_id,amount_minor,currency,status) values($1,$2,$3,'pending') returning *",[seller.id,body.amountMinor,body.currency.toUpperCase()])).rows[0];
-  await c.query("insert into ledger_entries(seller_id,type,amount_minor,currency,description) values($1,'payout',$2,$3,'Заявка на вывод средств')",[seller.id,-body.amountMinor,body.currency.toUpperCase()]);
+  const currency=body.currency.toUpperCase();
+  const p=(await c.query("insert into payouts(seller_id,amount_minor,currency,status) values($1,$2,$3,'pending') returning *",[seller.id,body.amountMinor,currency])).rows[0];
+  await c.query("insert into ledger_entries(seller_id,type,amount_minor,currency,description) values($1,'payout',$2,$3,'Заявка на вывод средств')",[seller.id,-body.amountMinor,currency]);
+  await c.query("insert into notifications(user_id,type,title,body) values($1,'payout_pending','Заявка на вывод','Заявка на вывод средств создана и ожидает обработки')",[seller.id]);
   return p;
  });
  return reply.code(201).send({payout:result});
