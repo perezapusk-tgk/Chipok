@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { z } from "zod";
-import { randomUUID, createHash, randomInt } from "node:crypto";
+import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv } from "node:crypto";
 import { pool, withTransaction } from "./db.js";
 import { validateTelegramInitData } from "./telegram.js";
 import { answerPreCheckout, createTelegramInvoiceLink } from "./telegram-payments.js";
@@ -9,6 +9,9 @@ const app=Fastify({logger:true}); await app.register(cors,{origin:true});
 function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missing ${key}`);return v}
 function hashHandover(code:string){return createHash("sha256").update(code).digest("hex")}
 function makeHandoverCode(){return String(randomInt(100000,1000000))}
+function handoverKey(){return createHash("sha256").update(env("TELEGRAM_BOT_TOKEN")).digest()}
+function encryptHandover(code:string){const iv=Buffer.from(randomUUID().replaceAll("-","").slice(0,24),"hex");const cipher=createCipheriv("aes-256-gcm",handoverKey(),iv);const data=Buffer.concat([cipher.update(code,"utf8"),cipher.final()]);return iv.toString("hex")+":"+cipher.getAuthTag().toString("hex")+":"+data.toString("hex")}
+function decryptHandover(value:string){const [ivHex,tagHex,dataHex]=value.split(":");const decipher=createDecipheriv("aes-256-gcm",handoverKey(),Buffer.from(ivHex,"hex"));decipher.setAuthTag(Buffer.from(tagHex,"hex"));return Buffer.concat([decipher.update(Buffer.from(dataHex,"hex")),decipher.final()]).toString("utf8")}
 async function auth(request:any){
  const header=request.headers.authorization as string|undefined; const raw=header?.startsWith("tma ")?header.slice(4):"";
  if(!raw) throw Object.assign(new Error("Unauthorized"),{statusCode:401});
@@ -60,10 +63,10 @@ app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
   if(so.order_status!=="paid"||so.status!=="paid")throw Object.assign(new Error("Order is not awaiting seller confirmation"),{statusCode:409});
   const code=makeHandoverCode();
   await c.query("update seller_orders set status='seller_confirmed' where id=$1",[id]);
-  await c.query("insert into handover_codes(seller_order_id,code_hash) values($1,$2)",[id,hashHandover(code)]);
+  await c.query("insert into handover_codes(seller_order_id,code_hash,code_encrypted) values($1,$2,$3)",[id,hashHandover(code),encryptHandover(code)]);
   const pending=await c.query("select count(*)::int as n from seller_orders where order_id=$1 and status not in ('seller_confirmed','ready_for_handover','completed')",[so.order_id]);
   if(Number(pending.rows[0].n)===0)await c.query("update orders set status='seller_confirmed',updated_at=now() where id=$1",[so.order_id]);
-  return {sellerOrderId:id,orderId:so.order_id,handoverCode:code};
+  return {sellerOrderId:id,orderId:so.order_id};
  });
  if(!result)return reply.code(404).send({error:"Seller order not found"});
  return result;
@@ -71,9 +74,9 @@ app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
 
 app.get("/api/orders/:id/handover",async(req,reply)=>{
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
- const r=await pool.query("select so.id as seller_order_id,so.seller_id,so.status,h.created_at,h.used_at from seller_orders so join orders o on o.id=so.order_id left join handover_codes h on h.seller_order_id=so.id where so.order_id=$1 and o.buyer_id=$2 order by so.created_at",[id,buyer.id]);
+ const r=await pool.query("select so.id as seller_order_id,so.seller_id,so.status,h.created_at,h.used_at,h.code_encrypted from seller_orders so join orders o on o.id=so.order_id left join handover_codes h on h.seller_order_id=so.id where so.order_id=$1 and o.buyer_id=$2 order by so.created_at",[id,buyer.id]);
  if(!r.rowCount)return reply.code(404).send({error:"Order not found"});
- return {items:r.rows};
+ return {items:r.rows.map((x:any)=>({...x,handoverCode:x.code_encrypted&&!x.used_at?decryptHandover(x.code_encrypted):undefined,code_encrypted:undefined}))};
 });
 
 app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
