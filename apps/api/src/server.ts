@@ -82,6 +82,26 @@ app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
  return result;
 });
 
+app.post("/api/seller-orders/:id/reject",async(req,reply)=>{
+ const seller=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
+ const result=await withTransaction(async(c)=>{
+  const so=(await c.query("select so.*,o.id as order_id,o.buyer_id,o.status as order_status from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
+  if(!so)return null;
+  if(so.status!=="paid"||so.order_status!=="paid")throw Object.assign(new Error("Заказ нельзя отменить на этом этапе"),{statusCode:409});
+  await c.query("update seller_orders set status='cancelled' where id=$1",[id]);
+  await c.query("update inventory i set reserved=greatest(0,i.reserved-oi.quantity),updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[id]);
+  await c.query("update seller_profiles set reliability_score=greatest(0,reliability_score-10),updated_at=now() where user_id=$1",[seller.id]);
+  const score=(await c.query("select reliability_score from seller_profiles where user_id=$1",[seller.id])).rows[0]?.reliability_score;
+  const open=await c.query("select count(*)::int as n from seller_orders where order_id=$1 and status not in ('cancelled','refunded')",[so.order_id]);
+  if(Number(open.rows[0].n)===0)await c.query("update orders set status='disputed',updated_at=now() where id=$1",[so.order_id]);
+  await c.query("insert into disputes(order_id,buyer_id,reason,description,previous_order_status) values($1,$2,'other',$3,'paid') on conflict do nothing",[so.order_id,so.buyer_id,"Продавец отменил заказ: товар недоступен. Требуется возврат."]);
+  await c.query("insert into notifications(user_id,type,title,body) values($1,'seller_cancelled','Продавец отменил заказ','Продавец сообщил, что товар недоступен. Заказ передан на возврат.')",[so.buyer_id]);
+  await c.query("insert into notifications(user_id,type,title,body) values($1,'seller_reliability','Снижение надёжности','За отмену оплаченного заказа рейтинг надёжности продавца снижен на 10 пунктов.')",[seller.id]);
+  return {sellerOrderId:id,orderId:so.order_id,status:"cancelled",reliabilityScore:Number(score)};
+ });
+ if(!result)return reply.code(404).send({error:"Seller order not found"});
+ return result;
+});
 app.post("/api/seller-orders/:id/ready",async(req,reply)=>{
  const seller=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const result=await withTransaction(async(c)=>{
