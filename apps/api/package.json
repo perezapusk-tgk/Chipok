@@ -1,1 +1,22 @@
-{"name":"@chipok/api","private":true,"scripts":{"dev":"tsx src/server.ts","build":"tsc","typecheck":"tsc --noEmit"},"dependencies":{"fastify":"latest","@fastify/cors":"latest","zod":"latest","pg":"latest"},"devDependencies":{"tsx":"latest","typescript":"latest","@types/pg":"latest"},"type":"module"}
+{
+  "name": "@chipok/api",
+  "private": true,
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "migrate": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "fastify": "latest",
+    "@fastify/cors": "latest",
+    "zod": "latest",
+    "pg": "latest"
+  },
+  "devDependencies": {
+    "tsx": "latest",
+    "typescript": "latest",
+    "@types/pg": "latest"
+  },
+  "type": "module"
+}
