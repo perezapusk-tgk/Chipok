@@ -70,6 +70,8 @@ app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
  const result=await withTransaction(async(c)=>{
   const so=(await c.query("select so.*,o.id as order_id,o.status as order_status from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
   if(!so)return null;
+  const sellerProfile=(await c.query("select reliability_score from seller_profiles where user_id=$1 for update",[seller.id])).rows[0];
+  if(Number(sellerProfile?.reliability_score ?? 0)<50)throw Object.assign(new Error("Продажи временно ограничены из-за низкой надёжности продавца"),{statusCode:403});
   if(so.order_status!=="paid"||so.status!=="paid")throw Object.assign(new Error("Order is not awaiting seller confirmation"),{statusCode:409});
   const code=makeHandoverCode();
   await c.query("update seller_orders set status='seller_confirmed' where id=$1",[id]);
