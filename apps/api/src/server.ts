@@ -222,7 +222,7 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
    if(!["refunded","cancelled"].includes(order.status)){
     const sellerRows=(await c.query("select seller_id,seller_amount_minor,platform_fee_minor,currency,status from seller_orders where order_id=$1 for update",[d.order_id])).rows;
     for(const so of sellerRows){
-      if(so.status!=="completed")await c.query("update inventory i set reserved=greatest(0,i.reserved-oi.quantity),updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[d.order_id]);
+      if(so.status!=="completed")await c.query("update inventory i set reserved=greatest(0,i.reserved-oi.quantity),updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[so.id]);
       const saleExists=await c.query("select 1 from ledger_entries where order_id=$1 and seller_id=$2 and type='sale' limit 1",[d.order_id,so.seller_id]);
       if(saleExists.rowCount){
         const refundExists=await c.query("select 1 from ledger_entries where order_id=$1 and seller_id=$2 and type='refund' limit 1",[d.order_id,so.seller_id]);
