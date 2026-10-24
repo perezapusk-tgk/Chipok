@@ -37,7 +37,7 @@ export default function Home(){
  const [products,setProducts]=useState<Product[]>(fallback),[orders,setOrders]=useState<Order[]>([]),[user,setUser]=useState<User|null>(null);
  const [sellerProducts,setSellerProducts]=useState<any[]>([]),[loading,setLoading]=useState(false),[message,setMessage]=useState("");
  const tg=typeof window!=="undefined"?window.Telegram?.WebApp:null;
- const authHeaders=()=>{const initData=typeof window!=="undefined"?window.Telegram?.WebApp?.initData:"";return initData?{Authorization:"tma "+initData}:{}};
+ const authHeaders=():Record<string,string>=>{const initData=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";const headers:Record<string,string>={};if(initData)headers.Authorization="tma "+initData;return headers;};
 
  useEffect(()=>{tg?.ready();tg?.expand();load();},[]);
  async function load(){
