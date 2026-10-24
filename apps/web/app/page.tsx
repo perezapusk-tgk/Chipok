@@ -77,7 +77,7 @@ export default function Home(){
  :tab==="catalog"?<><div className="hero"><h1>Каталог</h1><p>Товары от продавцов твоего круга. Без лишних посредников.</p></div><div className="grid">{items.map(p=><Card key={p.id} p={p} open={()=>setSelected(p)} add={()=>add(p)} toggleFavorite={toggleFavorite}/>)}</div></>
  :tab==="orders"?<Orders orders={orders} onLoad={loadOrders}/>
  :tab==="chat"?<Chats authHeaders={authHeaders} setMessage={setMessage}/>
- :tab==="profile"?<Profile user={user} sellerProducts={sellerProducts} loadSeller={loadSeller} setMessage={setMessage}/>
+ :tab==="profile"?<Profile user={user} sellerProducts={sellerProducts} loadSeller={loadSeller} setMessage={setMessage} categories={categories}/>
  :<Cart cart={cart} total={total} checkout={checkout} loading={loading}/>;
 
  return <div className="app"><main className="shell"><header className="top"><div className="brand"><div className="brand-mark">Ч</div><div><div className="brand-name">ЧИПОК</div><div className="tagline">Твой маркетплейс. Свои люди. Свои товары.</div></div></div><button className="icon-btn">♧</button></header>{message&&<div className="hero" style={{marginBottom:10}}><p>{message}</p></div>}{page}{cart.length>0&&tab!=="cart"&&<button className="fab" onClick={()=>setTab("cart")}>🛒<span>{cart.length}</span></button>}<nav className="bottom">{[["home","⌂","Главная"],["catalog","⌘","Каталог"],["orders","▣","Заказы"],["chat","◌","Чаты"],["profile","♙","Профиль"]].map(([id,ico,label])=><button key={id} className={"nav "+(tab===id?"active":"")} onClick={()=>{setTab(id);if(id==="orders")loadOrders();if(id==="profile"&&user?.role==="seller")loadSeller()}}><strong>{ico}</strong>{label}</button>)}</nav></main></div>;
@@ -190,7 +190,7 @@ function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}) {
 
 function statusRu(s:string){return ({created:"Ожидает оплаты",paid:"Оплачен",seller_confirmed:"Продавец подтвердил",ready_for_handover:"Готов к получению",completed:"Завершён",cancelled:"Отменён",refunded:"Возврат",disputed:"Спор"} as Record<string,string>)[s]||s}
 
-function Profile({user,sellerProducts,loadSeller,setMessage}:{user:User|null;sellerProducts:any[];loadSeller:()=>void;setMessage:(s:string)=>void}){
+function Profile({user,sellerProducts,loadSeller,setMessage,categories}:{user:User|null;sellerProducts:any[];loadSeller:()=>void;setMessage:(s:string)=>void;categories:any[]}){
  const seller=user?.role==="seller";
  const admin=user?.role==="admin";
  const [mode,setMode]=useState<"profile"|"seller"|"favorites"|"admin">("profile");
