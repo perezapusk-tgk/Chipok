@@ -42,7 +42,7 @@ export default function Home(){
  useEffect(()=>{tg?.ready();tg?.expand();load();},[]);
  async function load(){
    try{
-     const r=await fetch(api()+"/api/catalog"); if(r.ok){const d=await r.json(); if(d.items?.length)setProducts(d.items.map((p:any)=>({...p,price:p.price_minor/100,image:p.image_url})))}
+     const r=await fetch(api()+"/api/catalog"); if(r.ok){const d=await r.json(); setProducts((d.items||[]).map((p:any)=>({...p,price:p.price_minor/100,image:p.image_url})))} else if(process.env.NODE_ENV!=="production"){setProducts(fallback)}
      const me=await fetch(api()+"/api/me",{headers:authHeaders()}); if(me.ok){const d=await me.json();setUser(d.user)}
      const cr=await fetch(api()+"/api/categories"); if(cr.ok){const d=await cr.json();setCategories(d.items||[])}
      await loadFavorites();
