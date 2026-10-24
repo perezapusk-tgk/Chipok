@@ -41,16 +41,16 @@ app.post("/api/orders",async(req,reply)=>{
  const order=await withTransaction(async(c)=>{
   const bps=Math.max(0,Math.min(10000,Number(process.env.PLATFORM_COMMISSION_BPS||500)));
   const o=(await c.query("insert into orders(buyer_id,status,total_minor,platform_fee_minor) values($1,'created',0,0) returning id",[buyer.id])).rows[0];
-  const groups=new Map<string,any>();let total=0,feeTotal=0;
+  const groups=new Map<string,any>();let total=0,feeTotal=0;let currency:string|null=null;
   for(const item of body.items){
    const p=(await c.query(`select p.id,p.seller_id,p.title,p.price_minor,p.currency,p.fulfillment_type,i.stock,i.reserved from products p join inventory i on i.product_id=p.id where p.id=$1 and p.status='published' for update`,[item.productId])).rows[0];
    if(!p)throw Object.assign(new Error("Product unavailable"),{statusCode:409});
    if(p.stock-p.reserved<item.quantity)throw Object.assign(new Error("Insufficient stock"),{statusCode:409});
-   const line=Number(p.price_minor)*item.quantity,fee=Math.floor(line*bps/10000);total+=line;feeTotal+=fee;
+   if(currency===null)currency=p.currency;else if(currency!==p.currency)throw Object.assign(new Error('All items in one order must use the same currency'),{statusCode:409}); const line=Number(p.price_minor)*item.quantity,fee=Math.floor(line*bps/10000);total+=line;feeTotal+=fee;
    const g=groups.get(p.seller_id)||{sellerId:p.seller_id,subtotal:0,fee:0,fulfillment:p.fulfillment_type,items:[]};g.subtotal+=line;g.fee+=fee;g.items.push({...item,title:p.title,price:Number(p.price_minor)});groups.set(p.seller_id,g);
    await c.query("update inventory set reserved=reserved+$1,updated_at=now() where product_id=$2",[item.quantity,p.id]);
   }
-  await c.query("update orders set total_minor=$1,platform_fee_minor=$2,updated_at=now() where id=$3",[total,feeTotal,o.id]);
+  await c.query("update orders set total_minor=$1,platform_fee_minor=$2,currency=$3,updated_at=now() where id=$4",[total,feeTotal,currency||'RUB',o.id]);
   for(const g of groups.values()){const so=(await c.query(`insert into seller_orders(order_id,seller_id,subtotal_minor,platform_fee_minor,seller_amount_minor,fulfillment_type) values($1,$2,$3,$4,$3-$4,$5) returning id`,[o.id,g.sellerId,g.subtotal,g.fee,g.fulfillment])).rows[0];for(const item of g.items)await c.query("insert into order_items(seller_order_id,product_id,title_snapshot,unit_price_minor,quantity,total_minor) values($1,$2,$3,$4,$5,$6)",[so.id,item.productId,item.title,item.price,item.quantity,item.price*item.quantity]);}
   return {id:o.id,totalMinor:total,platformFeeMinor:feeTotal};
  }); return reply.code(201).send({order});
@@ -111,6 +111,30 @@ app.get("/api/admin/platform-balance",async(req,reply)=>{
  return {balances:r.rows.map(x=>({currency:x.currency,balanceMinor:Number(x.balance)}))};
 });
 
+app.get("/api/orders",async(req)=>{
+ const buyer=await auth(req);const r=await pool.query("select o.id,o.status,o.total_minor,o.currency,o.platform_fee_minor,o.created_at,coalesce(json_agg(json_build_object('id',so.id,'seller_id',so.seller_id,'status',so.status,'subtotal_minor',so.subtotal_minor,'seller_amount_minor',so.seller_amount_minor,'fulfillment_type',so.fulfillment_type)) filter(where so.id is not null),'[]') as seller_orders from orders o left join seller_orders so on so.order_id=o.id where o.buyer_id=$1 group by o.id order by o.created_at desc",[buyer.id]);return {items:r.rows};
+});
+app.get("/api/seller/orders",async(req)=>{
+ const seller=await auth(req);const r=await pool.query("select so.id,so.order_id,so.status,so.subtotal_minor,so.platform_fee_minor,so.seller_amount_minor,so.fulfillment_type,o.created_at,o.buyer_id from seller_orders so join orders o on o.id=so.order_id where so.seller_id=$1 order by o.created_at desc",[seller.id]);return {items:r.rows};
+});
+app.get("/api/seller/products",async(req)=>{
+ const seller=await auth(req);const r=await pool.query("select p.id,p.title,p.price_minor,p.currency,p.status,p.fulfillment_type,p.created_at,i.stock,i.reserved from products p join inventory i on i.product_id=p.id where p.seller_id=$1 order by p.created_at desc",[seller.id]);return {items:r.rows};
+});
+app.post("/api/seller/products",async(req,reply)=>{
+ const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
+ const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB"),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().url().optional()}).parse(req.body);
+ const slug=body.title.toLowerCase().replace(/[^a-zа-я0-9]+/gi,"-").replace(/^-|-$/g,"")+"-"+randomUUID().slice(0,8);
+ const product=await withTransaction(async(c)=>{
+  let store=(await c.query("select id from stores where seller_id=$1",[seller.id])).rows[0];
+  if(!store)store=(await c.query("insert into stores(seller_id,name) values($1,$2) returning id",[seller.id,seller.first_name||"Магазин"])).rows[0];
+  const p=(await c.query("insert into products(seller_id,store_id,category_id,title,slug,description,price_minor,currency,status,fulfillment_type) values($1,$2,$3,$4,$5,$6,$7,$8,'draft',$9) returning id,title,price_minor,currency,status,fulfillment_type",[seller.id,store.id,body.categoryId||null,body.title,slug,body.description||null,body.priceMinor,body.currency.toUpperCase(),body.fulfillmentType])).rows[0];
+  await c.query("insert into inventory(product_id,stock) values($1,$2)",[p.id,body.stock]);
+  if(body.imageUrl)await c.query("insert into product_images(product_id,url,sort_order) values($1,$2,0)",[p.id,body.imageUrl]);
+  await c.query("insert into moderation_queue(product_id,status) values($1,'pending')",[p.id]);
+  return p;
+ });
+ return reply.code(201).send({product});
+});
 app.post("/api/orders/:id/payment",async(req,reply)=>{
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const order=(await pool.query(`select o.id,o.total_minor,o.currency,o.status,o.buyer_id,coalesce(min(oi.title_snapshot),'Заказ ЧИПОК') as first_title from orders o left join seller_orders so on so.order_id=o.id left join order_items oi on oi.seller_order_id=so.id where o.id=$1 group by o.id`,[id])).rows[0];
@@ -125,7 +149,7 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
  const update:any=req.body;
  if(update.pre_checkout_query){
   const q=update.pre_checkout_query;const payment=(await pool.query(`select p.amount_minor,p.currency,o.status from payments p join orders o on o.id=p.order_id where p.payload=$1`,[q.invoice_payload])).rows[0];
-  const ok=!!payment&&payment.status==="created"&&Number(payment.amount_minor)===Number(q.total_amount)&&payment.currency===q.currency;
+  const ok=!!payment&&(payment.status==="pending"||payment.status==="created")&&Number(payment.amount_minor)===Number(q.total_amount)&&payment.currency===q.currency;
   await answerPreCheckout(String(q.id),ok,ok?undefined:"Заказ недоступен или сумма изменилась.");
  }
  if(update.message?.successful_payment){
