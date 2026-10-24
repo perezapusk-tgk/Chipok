@@ -1,11 +1,26 @@
-export default function Home() {
-  return <main style={{maxWidth:760,margin:"0 auto",padding:24,fontFamily:"system-ui"}}>
-    <h1>ЧИПОК</h1>
-    <p>Маркетплейс внутри Telegram.</p>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12}}>
-      {["Каталог","Мои заказы","Избранное","Профиль"].map(x=>
-        <button key={x} style={{padding:18,borderRadius:14,border:"1px solid #ddd",background:"#fff"}}>{x}</button>
-      )}
-    </div>
-  </main>;
+"use client";
+import {useMemo,useState} from "react";
+type P={id:string;title:string;price:number;seller:string;rating:number;reviews:number;category:string;image:string};
+const ps:P[]=[
+{id:"1",title:"Тактический рюкзак 35 л",price:4990,seller:"TacticalStore",rating:4.8,reviews:124,category:"Одежда",image:"https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=85"},
+{id:"2",title:"Худи оверсайз",price:2490,seller:"UrbanWear",rating:4.7,reviews:89,category:"Одежда",image:"https://images.unsplash.com/photo-1556821840-3a63f95609a7?auto=format&fit=crop&w=900&q=85"},
+{id:"3",title:"Беспроводные наушники",price:3990,seller:"TechZone",rating:4.9,reviews:210,category:"Электроника",image:"https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1?auto=format&fit=crop&w=900&q=85"},
+{id:"4",title:"Туристический стул",price:1990,seller:"OutdoorLife",rating:4.6,reviews:72,category:"Дом",image:"https://images.unsplash.com/photo-1598301257982-0cf014dabbcd?auto=format&fit=crop&w=900&q=85"}];
+const cats=["Все","Еда","Одежда","Электроника","Дом"];
+const rub=(n:number)=>new Intl.NumberFormat("ru-RU").format(n)+" ₽";
+export default function Home(){
+const [tab,setTab]=useState("home"),[cat,setCat]=useState("Все"),[q,setQ]=useState(""),[cart,setCart]=useState<P[]>([]),[selected,setSelected]=useState<P|null>(null);
+const items=useMemo(()=>ps.filter(p=>(cat==="Все"||p.category===cat)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[cat,q]);
+if(selected)return <div className="app"><main className="shell detail"><button className="icon-btn back" onClick={()=>setSelected(null)}>←</button><div className="detail-image"><img src={selected.image} alt={selected.title}/></div><h1>{selected.title}</h1><div className="rating"><b>★ {selected.rating}</b> ({selected.reviews} отзыва)</div><div className="seller">♙ {selected.seller}</div><div className="price">{rub(selected.price)}</div><div className="meta"><div>Наличие<b>В наличии</b></div><div>Формат<b>Самовывоз</b></div><div>Комиссия<b>5% с продавца</b></div></div><button className="primary wide" onClick={()=>{setCart([...cart,selected]);setSelected(null)}}>Добавить в корзину</button></main></div>;
+const total=cart.reduce((s,p)=>s+p.price,0);
+return <div className="app"><main className="shell"><header className="top"><div className="brand"><div className="brand-mark">Ч</div><div><div className="brand-name">ЧИПОК</div><div className="tagline">Твой маркетплейс. Свои люди. Свои товары.</div></div></div><button className="icon-btn">♧</button></header>
+tab==="home"&&<><label className="search">⌕<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Что ищем?"/></label><div className="chips">{cats.map(c=><button key={c} className={"chip "+(cat===c?"active":"")} onClick={()=>setCat(c)}>{c}</button>)}</div><div className="section-head"><h2>Популярное</h2><span>Смотреть все →</span></div><div className="grid">{items.map(p=><Card key={p.id} p={p} open={()=>setSelected(p)} add={()=>setCart([...cart,p])}/>)}</div></>
+tab==="catalog"&&<><div className="hero"><h1>Каталог</h1><p>Закрытый маркетплейс для своего круга. Максимум 15 продавцов.</p></div><div className="grid">{items.map(p=><Card key={p.id} p={p} open={()=>setSelected(p)} add={()=>setCart([...cart,p])}/>)}</div></>
+tab==="orders"&&<div className="hero"><h1>Мои заказы</h1><p>Оплаченные, готовые к получению и завершённые заказы.</p><div className="menu"><button>Заказ #4287 <span>В пути ›</span></button><button>Заказ #4286 <span>Готов к получению ›</span></button></div></div>
+tab==="chat"&&<div className="hero"><h1>Чаты</h1><p>Покупатель и продавец договариваются о месте и времени встречи прямо здесь.</p><div className="menu"><button>TacticalStore <span>В сети ›</span></button><button>UrbanWear <span>›</span></button></div></div>
+tab==="profile"&&<div className="profile-card"><div className="row"><div className="avatar">А</div><div><b>Александр</b><div className="small">Покупатель</div></div></div><div className="small">Мой баланс</div><div className="balance">12 450 ₽</div></div>
+tab==="cart"&&<div className="hero"><h1>Корзина</h1>{cart.map((p,i)=><div className="row" key={i} style={{padding:"12px 0",borderBottom:"1px solid #20323b"}}><img src={p.image} alt="" width="54" height="54" style={{borderRadius:12,objectFit:"cover"}}/><div style={{flex:1}}><b style={{fontSize:12}}>{p.title}</b><div className="small">{p.seller}</div></div><b>{rub(p.price)}</b></div>)}<p className="small">Комиссия платформы для продавца: 5%</p><h2>Итого {rub(total)}</h2><button className="primary wide" onClick={()=>alert("В Telegram откроется защищённая форма оплаты.")}>Оформить и оплатить в Telegram</button></div>
+cart.length>0&&tab!=="cart"&&<button className="fab" onClick={()=>setTab("cart")}>🛒<span>{cart.length}</span></button>
+<nav className="bottom">{[["home","⌂","Главная"],["catalog","⌘","Каталог"],["orders","▣","Заказы"],["chat","◌","Чаты"],["profile","♙","Профиль"]].map(([id,ico,label])=><button key={id} className={"nav "+(tab===id?"active":"")} onClick={()=>setTab(id)}><strong>{ico}</strong>{label}</button>)}</nav></main></div>;
 }
+function Card({p,open,add}:{p:P;open:()=>void;add:()=>void}){return <article className="card"><button onClick={open} style={{border:0,padding:0,width:"100%",background:"transparent",color:"inherit",textAlign:"left"}}><div className="card-img"><img src={p.image} alt={p.title}/><span className="badge">В наличии</span></div><div className="card-body"><div className="card-title">{p.title}</div><div className="rating"><b>★ {p.rating}</b> ({p.reviews})</div><div className="seller">{p.seller}</div><div className="price">{rub(p.price)}</div></div></button><button className="bookmark" onClick={e=>{e.stopPropagation();add()}}>♡</button></article>}
