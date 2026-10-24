@@ -92,7 +92,14 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
   await c.query("update seller_orders set status='completed' where id=$1",[id]);
   await c.query("update orders set status=case when not exists(select 1 from seller_orders where order_id=$1 and status<>'completed') then 'completed' else 'seller_confirmed' end,updated_at=now() where id=$1",[so.order_id]);
   await c.query("update inventory i set reserved=reserved-oi.quantity,stock=stock-oi.quantity,updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[id]);
+  const sellerOrder=(await c.query("select seller_id,seller_amount_minor,platform_fee_minor,currency from seller_orders where id=$1",[id])).rows[0];
+  const existing=(await c.query("select 1 from ledger_entries where order_id=$1 and seller_id=$2 and type='sale' limit 1",[so.order_id,seller.id])).rowCount;
+  if(!existing){
+    await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'sale',$3,$4,'Продажа через ЧИПОК'),($1,$2,'commission',-$5,$4,'Комиссия ЧИПОК')",
+      [seller.id,so.order_id,Number(sellerOrder.seller_amount_minor)+Number(sellerOrder.platform_fee_minor),sellerOrder.currency,Number(sellerOrder.platform_fee_minor)]);
+  }
   await c.query("update seller_profiles set completed_sales=completed_sales+1 where user_id=$1",[seller.id]);
+  await c.query("insert into notifications(user_id,type,title,body) values($1,'order_completed','Заказ завершён','Получение заказа подтверждено')",[so.buyer_id]);
   return {sellerOrderId:id,orderId:so.order_id,status:"completed"};
  });
  if(!result)return reply.code(404).send({error:"Seller order not found"});
@@ -101,8 +108,9 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
 
 app.get("/api/seller/balance",async(req)=>{
  const seller=await auth(req);
- const r=await pool.query("select coalesce(sum(case when type in ('sale','adjustment') then amount_minor else 0 end),0)::bigint as gross,coalesce(sum(case when type='commission' then amount_minor else 0 end),0)::bigint as commission,coalesce(sum(case when type='payout' then amount_minor else 0 end),0)::bigint as payouts from ledger_entries where seller_id=$1",[seller.id]);
- const x=r.rows[0];return {currency:"RUB",grossMinor:Number(x.gross),commissionMinor:Number(x.commission),payoutMinor:Number(x.payouts),availableMinor:Number(x.gross)+Number(x.commission)+Number(x.payouts)};
+ const r=await pool.query("select coalesce(sum(case when type='sale' then amount_minor when type in ('commission','payout') then amount_minor else 0 end),0)::bigint as available from ledger_entries where seller_id=$1",[seller.id]);
+ const pending=await pool.query("select coalesce(sum(so.seller_amount_minor),0)::bigint as pending from seller_orders so join orders o on o.id=so.order_id where so.seller_id=$1 and so.status in ('paid','seller_confirmed','ready_for_handover')",[seller.id]);
+ const x=r.rows[0];return {currency:"RUB",availableMinor:Number(x.available),pendingMinor:Number(pending.rows[0].pending),totalEarnedMinor:Number(x.available)+Number(pending.rows[0].pending)};
 });
 
 app.get("/api/admin/platform-balance",async(req,reply)=>{
@@ -111,6 +119,22 @@ app.get("/api/admin/platform-balance",async(req,reply)=>{
  return {balances:r.rows.map(x=>({currency:x.currency,balanceMinor:Number(x.balance)}))};
 });
 
+app.post("/api/seller/payouts",async(req,reply)=>{
+ const seller=await auth(req); if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
+ const body=z.object({amountMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB")}).parse(req.body);
+ const result=await withTransaction(async(c)=>{
+  const available=await c.query("select coalesce(sum(case when type='sale' then amount_minor when type in ('commission','payout') then amount_minor else 0 end),0)::bigint as n from ledger_entries where seller_id=$1",[seller.id]);
+  const amount=Number(available.rows[0].n);
+  if(body.amountMinor>amount)throw Object.assign(new Error("Insufficient available balance"),{statusCode:409});
+  const p=(await c.query("insert into payouts(seller_id,amount_minor,currency,status) values($1,$2,$3,'pending') returning *",[seller.id,body.amountMinor,body.currency.toUpperCase()])).rows[0];
+  await c.query("insert into ledger_entries(seller_id,type,amount_minor,currency,description) values($1,'payout',$2,$3,'Заявка на вывод средств')",[seller.id,-body.amountMinor,body.currency.toUpperCase()]);
+  return p;
+ });
+ return reply.code(201).send({payout:result});
+});
+app.get("/api/seller/payouts",async(req)=>{
+ const seller=await auth(req); const r=await pool.query("select id,amount_minor,currency,status,provider_payout_id,created_at,completed_at from payouts where seller_id=$1 order by created_at desc",[seller.id]); return {items:r.rows};
+});
 app.post("/api/seller/onboard",async(req,reply)=>{
  const user=await auth(req);
  if(user.role==="admin"||user.role==="seller")return {seller:true,role:user.role};
@@ -203,9 +227,8 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
    await c.query("update payments set status='paid',provider_payment_id=$1,telegram_charge_id=$2,provider_charge_id=$3,updated_at=now() where id=$4",[sp.provider_payment_charge_id||null,sp.telegram_payment_charge_id||null,sp.provider_payment_charge_id||null,p.id]);
    await c.query("update orders set status='paid',updated_at=now() where id=$1",[p.order_id]);
    await c.query("update seller_orders set status='paid' where order_id=$1",[p.order_id]);
-   const sellers=await c.query("select seller_id,seller_amount_minor,platform_fee_minor,currency from seller_orders where order_id=$1",[p.order_id]);
-   for(const s of sellers.rows){await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'sale',$3,$4,'Продажа через ЧИПОК'),($1,$2,'commission',-$5,$4,'Комиссия ЧИПОК')",[s.seller_id,p.order_id,Number(s.seller_amount_minor)+Number(s.platform_fee_minor),s.currency,s.platform_fee_minor]);}
-   const fee=(await c.query("select platform_fee_minor,currency from orders where id=$1",[p.order_id])).rows[0];await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия ЧИПОК')",[p.order_id,fee.platform_fee_minor,fee.currency]);
+   const fee=(await c.query("select platform_fee_minor,currency from orders where id=$1",[p.order_id])).rows[0];
+   await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия ЧИПОК') on conflict do nothing",[p.order_id,fee.platform_fee_minor,fee.currency]);
   });
  }
  return {ok:true};
