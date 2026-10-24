@@ -253,6 +253,9 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
   } else {
    const restored=d.previous_order_status||"completed";
    await c.query("update orders set status=$1,updated_at=now() where id=$2",[restored,d.order_id]);
+   if(restored==="paid"||restored==="seller_confirmed"||restored==="ready_for_handover"||restored==="completed"){
+    await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'dispute_rejected','Спор отклонён','Решение администратора: спор отклонён.' from orders where id=$1",[d.order_id]);
+   }
   }
   await c.query("insert into admin_actions(admin_id,action,target_type,target_id,metadata) values($1,$2,$3,$4,$5)",[admin.id,"resolve_dispute","dispute",id,JSON.stringify({resolution:body.resolution,note:body.note||null})]);
   return {id,status:"resolved",resolution:body.resolution};
