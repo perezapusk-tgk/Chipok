@@ -8,7 +8,7 @@ export async function runMigrations() {
     applied_at timestamptz not null default now()
   )`);
   const dir = path.resolve(process.cwd(), "apps/api/migrations");
-  const files = (await readdir(dir)).filter(x => /^\\d+_.*\\.sql$/.test(x)).sort();
+  const files = (await readdir(dir)).filter(x => /^\d+_.*\.sql$/.test(x)).sort();
   for (const filename of files) {
     const done = await pool.query("select 1 from schema_migrations where filename=$1", [filename]);
     if (done.rowCount) continue;
