@@ -34,7 +34,7 @@ const api=()=>process.env.NEXT_PUBLIC_API_URL||"http://localhost:3001";
 export default function Home(){
  const [tab,setTab]=useState("home"),[cat,setCat]=useState("Все"),[q,setQ]=useState("");
  const [cart,setCart]=useState<Product[]>([]),[selected,setSelected]=useState<Product|null>(null);
- const [products,setProducts]=useState<Product[]>(fallback),[orders,setOrders]=useState<Order[]>([]),[user,setUser]=useState<User|null>(null),[categories,setCategories]=useState<any[]>([]);
+ const [products,setProducts]=useState<Product[]>(fallback),[orders,setOrders]=useState<Order[]>([]),[user,setUser]=useState<User|null>(null),[categories,setCategories]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]);
  const [sellerProducts,setSellerProducts]=useState<any[]>([]),[loading,setLoading]=useState(false),[message,setMessage]=useState("");
  const tg=typeof window!=="undefined"?window.Telegram?.WebApp:null;
  const authHeaders=():Record<string,string>=>{const initData=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";const headers:Record<string,string>={};if(initData)headers.Authorization="tma "+initData;return headers;};
@@ -46,9 +46,12 @@ export default function Home(){
      const me=await fetch(api()+"/api/me",{headers:authHeaders()}); if(me.ok){const d=await me.json();setUser(d.user)}
      const cr=await fetch(api()+"/api/categories"); if(cr.ok){const d=await cr.json();setCategories(d.items||[])}
      await loadFavorites();
+     await loadNotifications();
    }catch{}
  }
  async function loadOrders(){const r=await fetch(api()+"/api/orders",{headers:authHeaders()});if(r.ok)setOrders((await r.json()).items||[])}
+ async function loadNotifications(){const r=await fetch(api()+"/api/notifications",{headers:authHeaders()});if(r.ok)setNotifications((await r.json()).items||[])}
+ async function readNotification(id:string){const r=await fetch(api()+"/api/notifications/"+id+"/read",{method:"POST",headers:authHeaders()});if(r.ok)setNotifications(prev=>prev.map(n=>n.id===id?{...n,read_at:new Date().toISOString()}:n))}
  async function loadSeller(){const r=await fetch(api()+"/api/seller/products",{headers:authHeaders()});if(r.ok)setSellerProducts((await r.json()).items||[])}
  const items=useMemo(()=>products.filter(p=>(cat==="Все"||p.category===cat)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[products,cat,q]);
  const total=cart.reduce((s,p)=>s+(p.price_minor??Math.round((p.price||0)*100)),0);
@@ -80,7 +83,7 @@ export default function Home(){
  :tab==="profile"?<Profile user={user} sellerProducts={sellerProducts} loadSeller={loadSeller} setMessage={setMessage} categories={categories}/>
  :<Cart cart={cart} total={total} checkout={checkout} loading={loading}/>;
 
- return <div className="app"><main className="shell"><header className="top"><div className="brand"><div className="brand-mark">Ч</div><div><div className="brand-name">ЧИПОК</div><div className="tagline">Твой маркетплейс. Свои люди. Свои товары.</div></div></div><button className="icon-btn">♧</button></header>{message&&<div className="hero" style={{marginBottom:10}}><p>{message}</p></div>}{page}{cart.length>0&&tab!=="cart"&&<button className="fab" onClick={()=>setTab("cart")}>🛒<span>{cart.length}</span></button>}<nav className="bottom">{[["home","⌂","Главная"],["catalog","⌘","Каталог"],["orders","▣","Заказы"],["chat","◌","Чаты"],["profile","♙","Профиль"]].map(([id,ico,label])=><button key={id} className={"nav "+(tab===id?"active":"")} onClick={()=>{setTab(id);if(id==="orders")loadOrders();if(id==="profile"&&user?.role==="seller")loadSeller()}}><strong>{ico}</strong>{label}</button>)}</nav></main></div>;
+ return <div className="app"><main className="shell"><header className="top"><div className="brand"><div className="brand-mark">Ч</div><div><div className="brand-name">ЧИПОК</div><div className="tagline">Твой маркетплейс. Свои люди. Свои товары.</div></div></div><button className="icon-btn" onClick={()=>{setTab("profile")}} aria-label="Уведомления">♧{notifications.some(n=>!n.read_at)&&<span style={{position:"absolute",margin:"-25px 0 0 25px",width:7,height:7,borderRadius:"50%",background:"var(--gold)"}}/>}</button></header>{message&&<div className="hero" style={{marginBottom:10}}><p>{message}</p></div>}{page}{cart.length>0&&tab!=="cart"&&<button className="fab" onClick={()=>setTab("cart")}>🛒<span>{cart.length}</span></button>}<nav className="bottom">{[["home","⌂","Главная"],["catalog","⌘","Каталог"],["orders","▣","Заказы"],["chat","◌","Чаты"],["profile","♙","Профиль"]].map(([id,ico,label])=><button key={id} className={"nav "+(tab===id?"active":"")} onClick={()=>{setTab(id);if(id==="orders")loadOrders();if(id==="profile"&&user?.role==="seller")loadSeller()}}><strong>{ico}</strong>{label}</button>)}</nav></main></div>;
 }
 
 function Card({p,open,add,toggleFavorite}:{p:Product;open:()=>void;add:()=>void;toggleFavorite:(p:Product)=>void}){const price=p.price_minor??Math.round((p.price||0)*100);return <article className="card"><button onClick={open} style={{border:0,padding:0,width:"100%",background:"transparent",color:"inherit",textAlign:"left"}}><div className="card-img"><img src={p.image||p.image_url||""} alt={p.title}/><span className="badge">В наличии</span></div><div className="card-body"><div className="card-title">{p.title}</div><div className="rating"><b>★ {p.rating||"—"}</b> {p.reviews?"("+p.reviews+")":""}</div><div className="seller">{p.seller||"Продавец"}</div><div className="price">{money(price,p.currency)}</div></div></button><button className="bookmark" onClick={e=>{e.stopPropagation();toggleFavorite(p)}}>♡</button></article>}
@@ -193,13 +196,14 @@ function statusRu(s:string){return ({created:"Ожидает оплаты",paid:
 function Profile({user,sellerProducts,loadSeller,setMessage,categories}:{user:User|null;sellerProducts:any[];loadSeller:()=>void;setMessage:(s:string)=>void;categories:any[]}){
  const seller=user?.role==="seller";
  const admin=user?.role==="admin";
- const [mode,setMode]=useState<"profile"|"seller"|"favorites"|"admin">("profile");
+ const [mode,setMode]=useState<"profile"|"seller"|"favorites"|"notifications"|"admin">("profile");
  const [fav,setFav]=useState<any[]>([]);
  async function favorites(){const r=await fetch(api()+"/api/favorites",{headers:{Authorization:"tma "+(typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"")}});if(r.ok)setFav((await r.json()).items||[]);setMode("favorites")}
+ if(mode==="notifications")return <div className="hero"><button className="icon-btn" onClick={()=>setMode("profile")}>←</button><h1>Уведомления</h1>{!notifications.length?<p>Новых событий пока нет.</p>:<div className="menu">{notifications.map(n=><button key={n.id} onClick={()=>readNotification(n.id)} style={{opacity:n.read_at?.6:1,textAlign:"left"}}><span><b>{n.title}</b><br/><small>{n.body||""}</small></span><span>{n.read_at?"":"●"}</span></button>)}</div>}</div>;
  if(mode==="favorites")return <div className="hero"><button className="icon-btn" onClick={()=>setMode("profile")}>←</button><h1>Избранное</h1>{!fav.length?<p>Здесь пока ничего нет.</p>:<div className="menu">{fav.map(x=><button key={x.id}>{x.title}<span>{money(x.price_minor,x.currency)} ›</span></button>)}</div>}</div>;
  if(mode==="seller")return <SellerPanel products={sellerProducts} loadSeller={loadSeller} setMessage={setMessage} back={()=>setMode("profile")} categories={categories}/>;
  if(mode==="admin")return <AdminPanel setMessage={setMessage} back={()=>setMode("profile")}/>;
- return <div><div className="profile-card"><div className="row"><div className="avatar">{(user?.first_name||"Ч").slice(0,1)}</div><div><b>{user?.first_name||"Покупатель"}</b><div className="small">{seller?"Продавец":"Покупатель"}</div></div></div><div className="menu"><button onClick={favorites}>Избранное <span>♡ ›</span></button>{seller&&<button onClick={()=>{loadSeller();setMode("seller")}}>Кабинет продавца <span>›</span></button>}
+ return <div><div className="profile-card"><div className="row"><div className="avatar">{(user?.first_name||"Ч").slice(0,1)}</div><div><b>{user?.first_name||"Покупатель"}</b><div className="small">{seller?"Продавец":"Покупатель"}</div></div></div><div className="menu"><button onClick={favorites}>Избранное <span>♡ ›</span></button>{seller&&<button onClick={()=>{loadSeller();setMode("seller")}}>Кабинет продавца <span>›</span></button>}<button onClick={()=>setMode("notifications")}>Уведомления <span>{notifications.filter(n=>!n.read_at).length||""} ›</span></button>
  {admin&&<button onClick={()=>setMode("admin")}>Админ-панель <span>›</span></button>}<button onClick={()=>setMessage("Безопасная оплата проходит внутри Telegram. Комиссия ЧИПОК удерживается с продавца.")}>Оплата и безопасность <span>›</span></button><button onClick={()=>setMessage("Получение: продавец и покупатель договариваются о месте и времени в чате.")}>Как получить заказ <span>›</span></button></div></div></div>
 }
 function AdminPanel({setMessage,back}:{setMessage:(s:string)=>void;back:()=>void}){
