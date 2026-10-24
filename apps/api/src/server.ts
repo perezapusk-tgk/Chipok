@@ -6,7 +6,9 @@ import { pool, withTransaction } from "./db.js";
 import { validateTelegramInitData } from "./telegram.js";
 import { answerPreCheckout, createTelegramInvoiceLink } from "./telegram-payments.js";
 import { runMigrations } from "./migrate.js";
-const app=Fastify({logger:true}); await app.register(cors,{origin:true});
+const app=Fastify({logger:true});
+const allowedOrigins=(process.env.CORS_ALLOWED_ORIGINS||process.env.TELEGRAM_WEBAPP_URL||"").split(",").map(x=>x.trim()).filter(Boolean);
+await app.register(cors,{origin:(origin,cb)=>{if(!origin||allowedOrigins.length===0||allowedOrigins.includes(origin))return cb(null,true);return cb(new Error("Origin not allowed"),false)}});
 function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missing ${key}`);return v}
 const rateBuckets=new Map<string,{count:number;reset:number}>();
 function rateLimit(key:string,limit=60,windowMs=60_000){const now=Date.now();const cur=rateBuckets.get(key);if(!cur||cur.reset<=now){rateBuckets.set(key,{count:1,reset:now+windowMs});return true}if(cur.count>=limit)return false;cur.count++;return true}
@@ -39,6 +41,18 @@ async function auth(request:any){
  return r.rows[0];
 }
 app.get("/health",async()=>({ok:true,service:"chipok-api",version:"0.3.1"}));
+async function configureTelegramWebhook(){
+ const token=process.env.TELEGRAM_BOT_TOKEN;
+ const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;
+ const webUrl=process.env.TELEGRAM_WEBAPP_URL;
+ if(!token||!secret||!webUrl){app.log.warn("Telegram webhook is not configured: missing TELEGRAM_BOT_TOKEN, TELEGRAM_PAYMENT_WEBHOOK_SECRET or TELEGRAM_WEBAPP_URL");return;}
+ const webhookUrl=new URL("/api/payments/telegram/webhook",webUrl).toString();
+ const r=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:webhookUrl,secret_token:secret,allowed_updates:["pre_checkout_query","message"],drop_pending_updates:false})});
+ const data=await r.json() as {ok:boolean;description?:string};
+ if(!data.ok)throw new Error(data.description||"Telegram setWebhook failed");
+ app.log.info({webhookUrl},"Telegram payment webhook configured");
+}
+
 app.get("/api/me",async(req)=>({user:await auth(req)}));
 app.post("/api/auth/telegram",async(req)=>({user:await auth(req)}));
 app.get("/api/categories",async()=>({items:(await pool.query("select id,name,slug,parent_id,restricted,age_restriction from categories order by name")).rows}));
@@ -372,4 +386,5 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
 });
 app.setErrorHandler((error,req,reply)=>{req.log.error(error);const err=error as any;const status=err.statusCode??(err.name==="ZodError"?400:500);reply.code(status).send({error:status===500?"Internal server error":err.message})});
 await runMigrations();
+await configureTelegramWebhook().catch(error=>app.log.error(error,"Failed to configure Telegram webhook"));
 await app.listen({host:"0.0.0.0",port:Number(process.env.PORT||3001)});
