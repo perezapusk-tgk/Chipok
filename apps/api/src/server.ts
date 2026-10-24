@@ -175,6 +175,38 @@ app.get("/api/notifications",async(req)=>{const user=await auth(req);const r=awa
 app.post("/api/notifications/:id/read",async(req)=>{const user=await auth(req);const id=z.string().uuid().parse((req.params as any).id);await pool.query("update notifications set read_at=now() where id=$1 and user_id=$2",[id,user.id]);return {ok:true};});
 
 app.get("/api/admin/dashboard",async(req,reply)=>{const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});const [users,orders,sales,fees,sellers,disputes,moderation]=await Promise.all([pool.query("select count(*)::int as n from users"),pool.query("select count(*)::int as n from orders"),pool.query("select coalesce(sum(total_minor),0)::bigint as n from orders where status='completed'"),pool.query("select coalesce(sum(amount_minor),0)::bigint as n from platform_ledger_entries where type='commission'"),pool.query("select count(*)::int as n from seller_profiles"),pool.query("select count(*)::int as n from disputes where status='open'"),pool.query("select count(*)::int as n from moderation_queue where status='pending'")]);return {users:Number(users.rows[0].n),orders:Number(orders.rows[0].n),completedSalesMinor:Number(sales.rows[0].n),commissionMinor:Number(fees.rows[0].n),sellers:Number(sellers.rows[0].n),openDisputes:Number(disputes.rows[0].n),pendingModeration:Number(moderation.rows[0].n)};});
+app.get("/api/admin/orders",async(req,reply)=>{
+ const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
+ const q=z.object({status:z.string().optional(),limit:z.coerce.number().int().min(1).max(100).default(50)}).parse(req.query);
+ const values:any[]=[];let where="";
+ if(q.status){values.push(q.status);where=" where o.status=$1";}
+ values.push(q.limit);
+ const r=await pool.query(`select o.id,o.status,o.total_minor,o.currency,o.platform_fee_minor,o.created_at,
+ count(distinct so.id)::int as seller_orders
+ from orders o left join seller_orders so on so.order_id=o.id${where}
+ group by o.id order by o.created_at desc limit ${values.length}`,values);
+ return {items:r.rows};
+});
+app.get("/api/admin/disputes",async(req,reply)=>{
+ const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
+ const r=await pool.query(`select d.*,o.status as order_status,u.first_name as buyer_name from disputes d join orders o on o.id=d.order_id join users u on u.id=d.buyer_id order by d.created_at desc limit 100`);
+ return {items:r.rows};
+});
+app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
+ const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
+ const id=z.string().uuid().parse((req.params as any).id);
+ const body=z.object({resolution:z.enum(["refund","reject"]),note:z.string().trim().max(2000).optional()}).parse(req.body);
+ const result=await withTransaction(async(c)=>{
+  const d=(await c.query("select * from disputes where id=$1 for update",[id])).rows[0];if(!d)return null;
+  await c.query("update disputes set status='resolved',resolved_at=now() where id=$1",[id]);
+  if(body.resolution==="refund")await c.query("update orders set status='refunded',updated_at=now() where id=$1",[d.order_id]);
+  else await c.query("update orders set status='completed',updated_at=now() where id=$1",[d.order_id]);
+  await c.query("insert into admin_actions(admin_id,action,target_type,target_id,metadata) values($1,$2,$3,$4,$5)",[admin.id,"resolve_dispute","dispute",id,JSON.stringify({resolution:body.resolution,note:body.note||null})]);
+  return {id,status:"resolved",resolution:body.resolution};
+ });
+ if(!result)return reply.code(404).send({error:"Dispute not found"});
+ return result;
+});
 app.get("/api/admin/moderation",async(req,reply)=>{const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});const r=await pool.query(`select m.id,m.status,m.reason,m.created_at,p.id as product_id,p.title,p.price_minor,p.currency,u.first_name as seller_name from moderation_queue m join products p on p.id=m.product_id join users u on u.id=p.seller_id where m.status='pending' order by m.created_at asc`);return {items:r.rows};});
 app.get("/api/orders",async(req)=>{
  const buyer=await auth(req);const r=await pool.query("select o.id,o.status,o.total_minor,o.currency,o.platform_fee_minor,o.created_at,coalesce(json_agg(json_build_object('id',so.id,'seller_id',so.seller_id,'status',so.status,'subtotal_minor',so.subtotal_minor,'seller_amount_minor',so.seller_amount_minor,'fulfillment_type',so.fulfillment_type)) filter(where so.id is not null),'[]') as seller_orders from orders o left join seller_orders so on so.order_id=o.id where o.buyer_id=$1 group by o.id order by o.created_at desc",[buyer.id]);return {items:r.rows};
