@@ -1,12 +1,14 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash, randomInt } from "node:crypto";
 import { pool, withTransaction } from "./db.js";
 import { validateTelegramInitData } from "./telegram.js";
 import { answerPreCheckout, createTelegramInvoiceLink } from "./telegram-payments.js";
 const app=Fastify({logger:true}); await app.register(cors,{origin:true});
 function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missing ${key}`);return v}
+function hashHandover(code:string){return createHash("sha256").update(code).digest("hex")}
+function makeHandoverCode(){return String(randomInt(100000,1000000))}
 async function auth(request:any){
  const header=request.headers.authorization as string|undefined; const raw=header?.startsWith("tma ")?header.slice(4):"";
  if(!raw) throw Object.assign(new Error("Unauthorized"),{statusCode:401});
@@ -50,6 +52,62 @@ app.post("/api/orders",async(req,reply)=>{
   return {id:o.id,totalMinor:total,platformFeeMinor:feeTotal};
  }); return reply.code(201).send({order});
 });
+app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
+ const seller=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
+ const result=await withTransaction(async(c)=>{
+  const so=(await c.query("select so.*,o.id as order_id,o.status as order_status from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
+  if(!so)return null;
+  if(so.order_status!=="paid"||so.status!=="paid")throw Object.assign(new Error("Order is not awaiting seller confirmation"),{statusCode:409});
+  const code=makeHandoverCode();
+  await c.query("update seller_orders set status='seller_confirmed' where id=$1",[id]);
+  await c.query("insert into handover_codes(seller_order_id,code_hash) values($1,$2)",[id,hashHandover(code)]);
+  const pending=await c.query("select count(*)::int as n from seller_orders where order_id=$1 and status not in ('seller_confirmed','ready_for_handover','completed')",[so.order_id]);
+  if(Number(pending.rows[0].n)===0)await c.query("update orders set status='seller_confirmed',updated_at=now() where id=$1",[so.order_id]);
+  return {sellerOrderId:id,orderId:so.order_id,handoverCode:code};
+ });
+ if(!result)return reply.code(404).send({error:"Seller order not found"});
+ return result;
+});
+
+app.get("/api/orders/:id/handover",async(req,reply)=>{
+ const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
+ const r=await pool.query("select so.id as seller_order_id,so.seller_id,so.status,h.created_at,h.used_at from seller_orders so join orders o on o.id=so.order_id left join handover_codes h on h.seller_order_id=so.id where so.order_id=$1 and o.buyer_id=$2 order by so.created_at",[id,buyer.id]);
+ if(!r.rowCount)return reply.code(404).send({error:"Order not found"});
+ return {items:r.rows};
+});
+
+app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
+ const seller=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
+ const body=z.object({code:z.string().regex(/^\\d{6}$/)}).parse(req.body);
+ const result=await withTransaction(async(c)=>{
+  const so=(await c.query("select so.*,o.id as order_id,o.buyer_id from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
+  if(!so)return null;
+  if(!["seller_confirmed","ready_for_handover"].includes(so.status))throw Object.assign(new Error("Order is not ready for handover"),{statusCode:409});
+  const h=(await c.query("select * from handover_codes where seller_order_id=$1 for update",[id])).rows[0];
+  if(!h||h.used_at||hashHandover(body.code)!==h.code_hash)throw Object.assign(new Error("Invalid handover code"),{statusCode:403});
+  await c.query("update handover_codes set used_at=now() where id=$1",[h.id]);
+  await c.query("update seller_orders set status='completed' where id=$1",[id]);
+  await c.query("update orders set status=case when not exists(select 1 from seller_orders where order_id=$1 and status<>'completed') then 'completed' else 'seller_confirmed' end,updated_at=now() where id=$1",[so.order_id]);
+  await c.query("update inventory i set reserved=reserved-oi.quantity,stock=stock-oi.quantity,updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[id]);
+  await c.query("update seller_profiles set completed_sales=completed_sales+1 where user_id=$1",[seller.id]);
+  return {sellerOrderId:id,orderId:so.order_id,status:"completed"};
+ });
+ if(!result)return reply.code(404).send({error:"Seller order not found"});
+ return result;
+});
+
+app.get("/api/seller/balance",async(req)=>{
+ const seller=await auth(req);
+ const r=await pool.query("select coalesce(sum(case when type in ('sale','adjustment') then amount_minor else 0 end),0)::bigint as gross,coalesce(sum(case when type='commission' then amount_minor else 0 end),0)::bigint as commission,coalesce(sum(case when type='payout' then amount_minor else 0 end),0)::bigint as payouts from ledger_entries where seller_id=$1",[seller.id]);
+ const x=r.rows[0];return {currency:"RUB",grossMinor:Number(x.gross),commissionMinor:Number(x.commission),payoutMinor:Number(x.payouts),availableMinor:Number(x.gross)+Number(x.commission)+Number(x.payouts)};
+});
+
+app.get("/api/admin/platform-balance",async(req,reply)=>{
+ const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
+ const r=await pool.query("select currency,coalesce(sum(amount_minor),0)::bigint as balance from platform_ledger_entries group by currency");
+ return {balances:r.rows.map(x=>({currency:x.currency,balanceMinor:Number(x.balance)}))};
+});
+
 app.post("/api/orders/:id/payment",async(req,reply)=>{
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const order=(await pool.query(`select o.id,o.total_minor,o.currency,o.status,o.buyer_id,coalesce(min(oi.title_snapshot),'Заказ ЧИПОК') as first_title from orders o left join seller_orders so on so.order_id=o.id left join order_items oi on oi.seller_order_id=so.id where o.id=$1 group by o.id`,[id])).rows[0];
