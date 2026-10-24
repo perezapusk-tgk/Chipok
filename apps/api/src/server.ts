@@ -111,6 +111,24 @@ app.get("/api/admin/platform-balance",async(req,reply)=>{
  return {balances:r.rows.map(x=>({currency:x.currency,balanceMinor:Number(x.balance)}))};
 });
 
+app.post("/api/seller/onboard",async(req,reply)=>{
+ const user=await auth(req);
+ if(user.role==="admin"||user.role==="seller")return {seller:true,role:user.role};
+ const body=z.object({storeName:z.string().trim().min(2).max(100),description:z.string().trim().max(1000).optional()}).parse(req.body);
+ await withTransaction(async(c)=>{
+  await c.query("update users set role='seller',updated_at=now() where id=$1",[user.id]);
+  await c.query("insert into seller_profiles(user_id,display_name,description) values($1,$2,$3) on conflict(user_id) do update set display_name=excluded.display_name,description=excluded.description",[user.id,body.storeName,body.description||null]);
+  await c.query("insert into stores(seller_id,name,description) values($1,$2,$3) on conflict(seller_id) do update set name=excluded.name,description=excluded.description",[user.id,body.storeName,body.description||null]);
+ });
+ return {seller:true,role:"seller"};
+});
+app.post("/api/admin/products/:id/moderate",async(req,reply)=>{
+ const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
+ const id=z.string().uuid().parse((req.params as any).id);const body=z.object({action:z.enum(["approve","reject"]),reason:z.string().trim().max(500).optional()}).parse(req.body);
+ const status=body.action==="approve"?"published":"rejected";
+ await withTransaction(async(c)=>{await c.query("update products set status=$1,updated_at=now() where id=$2",[status,id]);await c.query("update moderation_queue set status=$1,reason=$2,reviewed_by=$3,reviewed_at=now() where product_id=$4",[body.action==="approve"?"approved":"rejected",body.reason||null,admin.id,id]);});
+ return {ok:true,status};
+});
 app.get("/api/orders",async(req)=>{
  const buyer=await auth(req);const r=await pool.query("select o.id,o.status,o.total_minor,o.currency,o.platform_fee_minor,o.created_at,coalesce(json_agg(json_build_object('id',so.id,'seller_id',so.seller_id,'status',so.status,'subtotal_minor',so.subtotal_minor,'seller_amount_minor',so.seller_amount_minor,'fulfillment_type',so.fulfillment_type)) filter(where so.id is not null),'[]') as seller_orders from orders o left join seller_orders so on so.order_id=o.id where o.buyer_id=$1 group by o.id order by o.created_at desc",[buyer.id]);return {items:r.rows};
 });
