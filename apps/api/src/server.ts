@@ -8,6 +8,7 @@ import { answerPreCheckout, createTelegramInvoiceLink } from "./telegram-payment
 import { runMigrations } from "./migrate.js";
 const app=Fastify({logger:true}); await app.register(cors,{origin:true});
 function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missing ${key}`);return v}
+function reliabilityLevel(score:number){if(score<50)return "blocked";if(score<60)return "restricted";if(score<80)return "warning";return "stable"}
 function hashHandover(code:string){return createHash("sha256").update(code).digest("hex")}
 function makeHandoverCode(){return String(randomInt(100000,1000000))}
 function handoverKey(){return createHash("sha256").update(env("TELEGRAM_BOT_TOKEN")).digest()}
@@ -71,14 +72,17 @@ app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
   const so=(await c.query("select so.*,o.id as order_id,o.status as order_status from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
   if(!so)return null;
   const sellerProfile=(await c.query("select reliability_score from seller_profiles where user_id=$1 for update",[seller.id])).rows[0];
-  if(Number(sellerProfile?.reliability_score ?? 0)<50)throw Object.assign(new Error("Продажи временно ограничены из-за низкой надёжности продавца"),{statusCode:403});
+  const reliabilityScore=Number(sellerProfile?.reliability_score ?? 0);
+  const reliabilityLevelName=reliabilityLevel(reliabilityScore);
+  if(reliabilityLevelName==="blocked")throw Object.assign(new Error("Продажи заблокированы из-за низкой надёжности продавца"),{statusCode:403});
+  if(reliabilityLevelName==="restricted")throw Object.assign(new Error("Продажи временно ограничены: надёжность продавца ниже допустимого уровня"),{statusCode:403});
   if(so.order_status!=="paid"||so.status!=="paid")throw Object.assign(new Error("Order is not awaiting seller confirmation"),{statusCode:409});
   const code=makeHandoverCode();
   await c.query("update seller_orders set status='seller_confirmed' where id=$1",[id]);
   await c.query("insert into handover_codes(seller_order_id,code_hash,code_encrypted) values($1,$2,$3)",[id,hashHandover(code),encryptHandover(code)]);
   const pending=await c.query("select count(*)::int as n from seller_orders where order_id=$1 and status not in ('seller_confirmed','ready_for_handover','completed')",[so.order_id]);
   if(Number(pending.rows[0].n)===0)await c.query("update orders set status='seller_confirmed',updated_at=now() where id=$1",[so.order_id]);
-  return {sellerOrderId:id,orderId:so.order_id};
+  return {sellerOrderId:id,orderId:so.order_id,reliabilityScore,reliabilityLevel:reliabilityLevelName};
  });
  if(!result)return reply.code(404).send({error:"Seller order not found"});
  return result;
@@ -99,7 +103,9 @@ app.post("/api/seller-orders/:id/reject",async(req,reply)=>{
   await c.query("insert into disputes(order_id,buyer_id,reason,description,previous_order_status) select $1,$2,'other',$3,'paid' where not exists(select 1 from disputes where order_id=$1 and status='open')",[so.order_id,so.buyer_id,"Продавец отменил заказ: товар недоступен. Требуется возврат."]);
   await c.query("insert into notifications(user_id,type,title,body) values($1,'seller_cancelled','Продавец отменил заказ','Продавец сообщил, что товар недоступен. Заказ передан на возврат.')",[so.buyer_id]);
   await c.query("insert into notifications(user_id,type,title,body) values($1,'seller_reliability','Снижение надёжности','За отмену оплаченного заказа рейтинг надёжности продавца снижен на 10 пунктов.')",[seller.id]);
-  return {sellerOrderId:id,orderId:so.order_id,status:"cancelled",reliabilityScore:Number(score)};
+  const scoreNumber=Number(score);const level=reliabilityLevel(scoreNumber);
+  if(["restricted","blocked"].includes(level))await c.query("insert into notifications(user_id,type,title,body) values($1,'seller_reliability_action','Ограничение продаж',$2)",[seller.id,level==="blocked"?"Продажи заблокированы из-за низкой надёжности.":"Новые заказы временно ограничены из-за низкой надёжности."]);
+  return {sellerOrderId:id,orderId:so.order_id,status:"cancelled",reliabilityScore:scoreNumber,reliabilityLevel:level};
  });
  if(!result)return reply.code(404).send({error:"Seller order not found"});
  return result;
@@ -153,6 +159,7 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
  return result;
 });
 
+app.get("/api/seller/reliability",async(req)=>{const seller=await auth(req);const r=await pool.query("select reliability_score,completed_sales from seller_profiles where user_id=$1",[seller.id]);if(!r.rowCount)return {score:0,level:"blocked",completedSales:0};const score=Number(r.rows[0].reliability_score);return {score,level:reliabilityLevel(score),completedSales:Number(r.rows[0].completed_sales)};});
 app.get("/api/seller/balance",async(req)=>{
  const seller=await auth(req);
  const r=await pool.query("select coalesce(sum(case when type='sale' then amount_minor when type in ('commission','payout') then amount_minor else 0 end),0)::bigint as available from ledger_entries where seller_id=$1",[seller.id]);
@@ -301,6 +308,9 @@ app.get("/api/seller/products",async(req)=>{
 });
 app.post("/api/seller/products",async(req,reply)=>{
  const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
+ const reliability=await pool.query("select reliability_score from seller_profiles where user_id=$1",[seller.id]);
+ const reliabilityScore=Number(reliability.rows[0]?.reliability_score ?? 0);
+ if(reliabilityLevel(reliabilityScore)==="blocked")return reply.code(403).send({error:"Публикация товаров заблокирована из-за низкой надёжности продавца"});
  const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB"),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().url().optional()}).parse(req.body);
  const slug=body.title.toLowerCase().replace(/[^a-zа-я0-9]+/gi,"-").replace(/^-|-$/g,"")+"-"+randomUUID().slice(0,8);
  const product=await withTransaction(async(c)=>{
