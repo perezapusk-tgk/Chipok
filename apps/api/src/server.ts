@@ -215,6 +215,8 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
  const body=z.object({resolution:z.enum(["refund","reject"]),note:z.string().trim().max(2000).optional()}).parse(req.body);
  const result=await withTransaction(async(c)=>{
   const d=(await c.query("select * from disputes where id=$1 for update",[id])).rows[0];if(!d)return null;
+  const previousOrder=(await c.query("select status from orders where id=$1 for update",[d.order_id])).rows[0];
+  if(d.status!=="open")throw Object.assign(new Error("Dispute already resolved"),{statusCode:409});
   await c.query("update disputes set status='resolved',resolved_at=now() where id=$1",[id]);
   if(body.resolution==="refund"){
    const order=(await c.query("select total_minor,currency,status from orders where id=$1 for update",[d.order_id])).rows[0];
@@ -238,8 +240,7 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
     await c.query("update orders set status='refunded',updated_at=now() where id=$1",[d.order_id]);
    }
   } else {
-   const previous=(await c.query("select status from orders where id=$1 for update",[d.order_id])).rows[0];
-   const restored=["disputed","completed"].includes(previous?.status)?"completed":previous?.status||"completed";
+   const restored=previousOrder?.status==="disputed"?"completed":previousOrder?.status||"completed";
    await c.query("update orders set status=$1,updated_at=now() where id=$2",[restored,d.order_id]);
   }
   await c.query("insert into admin_actions(admin_id,action,target_type,target_id,metadata) values($1,$2,$3,$4,$5)",[admin.id,"resolve_dispute","dispute",id,JSON.stringify({resolution:body.resolution,note:body.note||null})]);
