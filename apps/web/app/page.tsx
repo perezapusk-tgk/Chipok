@@ -51,7 +51,9 @@ export default function Home(){
  const items=useMemo(()=>products.filter(p=>(cat==="Все"||p.category===cat)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[products,cat,q]);
  const total=cart.reduce((s,p)=>s+(p.price_minor??Math.round((p.price||0)*100)),0);
  const add=(p:Product)=>setCart(c=>[...c,p]);
- const toggleFavorite=async(p:Product)=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init){setMessage("Открой ЧИПОК внутри Telegram.");return}const r=await fetch(api()+"/api/favorites/"+p.id,{method:"POST",headers:{Authorization:"tma "+init}});if(!r.ok)setMessage("Не удалось добавить в избранное");else setMessage("Товар добавлен в избранное.");};
+ const [favoriteIds,setFavoriteIds]=useState<Set<string>>(new Set());
+ const loadFavorites=async()=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init)return;const r=await fetch(api()+"/api/favorites",{headers:{Authorization:"tma "+init}});if(r.ok){const d=await r.json();setFavoriteIds(new Set((d.items||d||[]).map((x:any)=>x.product_id||x.id)))}}; 
+ const toggleFavorite=async(p:Product)=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init){setMessage("Открой ЧИПОК внутри Telegram.");return}const isFav=favoriteIds.has(p.id);const r=await fetch(api()+"/api/favorites/"+p.id,{method:isFav?"DELETE":"POST",headers:{Authorization:"tma "+init}});if(!r.ok){setMessage("Не удалось изменить избранное");return}setFavoriteIds(prev=>{const n=new Set(prev);if(isFav)n.delete(p.id);else n.add(p.id);return n});setMessage(isFav?"Удалено из избранного":"Товар добавлен в избранное.");};
  const checkout=async()=>{
    if(!cart.length)return;
    if(!tg?.initData){setMessage("Открой ЧИПОК внутри Telegram для оплаты.");return}
