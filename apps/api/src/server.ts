@@ -12,15 +12,13 @@ function hashHandover(code:string){return createHash("sha256").update(code).dige
 function makeHandoverCode(){return String(randomInt(100000,1000000))}
 function handoverKey(){return createHash("sha256").update(env("TELEGRAM_BOT_TOKEN")).digest()}
 async function expireUnpaidOrders(){
- await pool.query(`with expired as (
-   select id from orders where status='created' and expires_at is not null and expires_at<=now() for update skip locked
- ), released as (
-   update inventory i set reserved=greatest(0,i.reserved-x.qty),updated_at=now()
-   from (select oi.product_id,sum(oi.quantity)::int qty from order_items oi join seller_orders so on so.id=oi.seller_order_id join expired e on e.id=so.order_id group by oi.product_id) x
-   where i.product_id=x.product_id returning i.product_id
- )
- update seller_orders so set status='cancelled' where so.order_id in (select id from expired) and so.status='created';
- update orders set status='cancelled',updated_at=now() where status='created' and expires_at is not null and expires_at<=now();`);
+ await withTransaction(async(c)=>{
+  const expired=(await c.query("select id from orders where status='created' and expires_at is not null and expires_at<=now() for update skip locked")).rows.map((x:any)=>x.id);
+  if(!expired.length)return;
+  await c.query("update inventory i set reserved=greatest(0,i.reserved-oi.quantity),updated_at=now() from order_items oi join seller_orders so on so.id=oi.seller_order_id where so.order_id=any($1::uuid[]) and so.status='created' and oi.product_id=i.product_id",[expired]);
+  await c.query("update seller_orders set status='cancelled' where order_id=any($1::uuid[]) and status='created'",[expired]);
+  await c.query("update orders set status='cancelled',updated_at=now() where id=any($1::uuid[]) and status='created'",[expired]);
+ });
 }
 function encryptHandover(code:string){const iv=Buffer.from(randomUUID().replaceAll("-","").slice(0,24),"hex");const cipher=createCipheriv("aes-256-gcm",handoverKey(),iv);const data=Buffer.concat([cipher.update(code,"utf8"),cipher.final()]);return iv.toString("hex")+":"+cipher.getAuthTag().toString("hex")+":"+data.toString("hex")}
 function decryptHandover(value:string){const [ivHex,tagHex,dataHex]=value.split(":");const decipher=createDecipheriv("aes-256-gcm",handoverKey(),Buffer.from(ivHex,"hex"));decipher.setAuthTag(Buffer.from(tagHex,"hex"));return Buffer.concat([decipher.update(Buffer.from(dataHex,"hex")),decipher.final()]).toString("utf8")}
