@@ -8,6 +8,11 @@ import { answerPreCheckout, createTelegramInvoiceLink } from "./telegram-payment
 import { runMigrations } from "./migrate.js";
 const app=Fastify({logger:true}); await app.register(cors,{origin:true});
 function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missing ${key}`);return v}
+const rateBuckets=new Map<string,{count:number;reset:number}>();
+function rateLimit(key:string,limit=60,windowMs=60_000){const now=Date.now();const cur=rateBuckets.get(key);if(!cur||cur.reset<=now){rateBuckets.set(key,{count:1,reset:now+windowMs});return true}if(cur.count>=limit)return false;cur.count++;return true}
+setInterval(()=>{const now=Date.now();for(const [k,v] of rateBuckets)if(v.reset<=now)rateBuckets.delete(k)},60_000).unref();
+app.addHook("onRequest",async(req,reply)=>{const key=`${req.ip}:${req.method}:${req.url.split("?")[0]}`;if(!rateLimit(key)){reply.header("Retry-After","60");return reply.code(429).send({error:"Слишком много запросов. Попробуйте позже."})}});
+
 function reliabilityLevel(score:number){if(score<50)return "blocked";if(score<60)return "restricted";if(score<80)return "warning";return "stable"}
 function hashHandover(code:string){return createHash("sha256").update(code).digest("hex")}
 function makeHandoverCode(){return String(randomInt(100000,1000000))}
