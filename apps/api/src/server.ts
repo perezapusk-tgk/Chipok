@@ -26,7 +26,7 @@ async function expireUnpaidOrders(){
   await c.query("update orders set status='cancelled',updated_at=now() where id=any($1::uuid[]) and status='created'",[expired]);
  });
 }
-function encryptHandover(code:string){const iv=Buffer.from(randomUUID().replaceAll("-","").slice(0,24),"hex");const cipher=createCipheriv("aes-256-gcm",handoverKey(),iv);const data=Buffer.concat([cipher.update(code,"utf8"),cipher.final()]);return iv.toString("hex")+":"+cipher.getAuthTag().toString("hex")+":"+data.toString("hex")}
+function encryptHandover(code:string){const iv=Buffer.from(randomUUID().replace(/-/g,"").slice(0,24),"hex");const cipher=createCipheriv("aes-256-gcm",handoverKey(),iv);const data=Buffer.concat([cipher.update(code,"utf8"),cipher.final()]);return iv.toString("hex")+":"+cipher.getAuthTag().toString("hex")+":"+data.toString("hex")}
 function decryptHandover(value:string){const [ivHex,tagHex,dataHex]=value.split(":");const decipher=createDecipheriv("aes-256-gcm",handoverKey(),Buffer.from(ivHex,"hex"));decipher.setAuthTag(Buffer.from(tagHex,"hex"));return Buffer.concat([decipher.update(Buffer.from(dataHex,"hex")),decipher.final()]).toString("utf8")}
 async function auth(request:any){
  const header=request.headers.authorization as string|undefined; const raw=header?.startsWith("tma ")?header.slice(4):"";
@@ -366,6 +366,6 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
  }
  return {ok:true};
 });
-app.setErrorHandler((error,req,reply)=>{req.log.error(error);const status=(error as any).statusCode??(error.name==="ZodError"?400:500);reply.code(status).send({error:status===500?"Internal server error":error.message})});
+app.setErrorHandler((error,req,reply)=>{req.log.error(error);const err=error as any;const status=err.statusCode??(err.name==="ZodError"?400:500);reply.code(status).send({error:status===500?"Internal server error":err.message})});
 await runMigrations();
 await app.listen({host:"0.0.0.0",port:Number(process.env.PORT||3001)});
