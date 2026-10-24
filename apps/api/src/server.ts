@@ -348,7 +348,7 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
  const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;if(!secret)return reply.code(503).send({error:"Payment webhook secret is not configured"});if(req.headers["x-telegram-bot-api-secret-token"]!==secret)return reply.code(401).send({error:"Unauthorized"});
  const update:any=req.body;
  if(update.pre_checkout_query){
-  const q=update.pre_checkout_query;const payment=(await pool.query(`select p.amount_minor,p.currency,o.status from payments p join orders o on o.id=p.order_id where p.payload=$1`,[q.invoice_payload])).rows[0];
+  const q=update.pre_checkout_query;const payment=(await pool.query(`select p.amount_minor,p.currency,o.status,p.updated_at from payments p join orders o on o.id=p.order_id where p.payload=$1`,[q.invoice_payload])).rows[0];
   const ok=!!payment&&(payment.status==="pending"||payment.status==="created")&&Number(payment.amount_minor)===Number(q.total_amount)&&payment.currency===q.currency;
   await answerPreCheckout(String(q.id),ok,ok?undefined:"Заказ недоступен или сумма изменилась.");
  }
