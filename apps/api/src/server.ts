@@ -391,7 +391,6 @@ app.patch("/api/seller/products/:id",async(req,reply)=>{
   return {kind:"ok" as const};
  });
  if(updated.kind==="not_found")return reply.code(404).send({error:"Товар не найден"});
- if(updated.kind==="active")return reply.code(409).send({error:"Нельзя изменить этот товар сейчас"});
  return {ok:true};
 });
 app.delete("/api/seller/products/:id",async(req,reply)=>{
