@@ -15,6 +15,12 @@ async function telegramSendMessage(chatId:number|string,text:string,replyMarkup?
 
 import { runMigrations } from "./migrate.js";
 const app=Fastify({logger:true});
+app.setErrorHandler((error,req,reply)=>{
+  req.log.error({err:error},"Unhandled API error");
+  const status=Number((error as any).statusCode)||500;
+  const safe=status>=500 ? (error.message||"Internal server error") : error.message;
+  reply.code(status).send({error:safe});
+});
 app.addHook("onSend",async(_req,reply)=>{
  reply.header("X-Content-Type-Options","nosniff");
  reply.header("X-Frame-Options","DENY");
