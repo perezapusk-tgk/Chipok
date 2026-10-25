@@ -5,10 +5,10 @@ import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv } f
 import { pool, withTransaction } from "./db.js";
 import { validateTelegramInitData } from "./telegram.js";
 import { answerPreCheckout, createTelegramInvoiceLink } from "./telegram-payments.js";
-async function telegramSendMessage(chatId:number|string,text:string){
+async function telegramSendMessage(chatId:number|string,text:string,replyMarkup?:Record<string,unknown>){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  if(!token)return;
- await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:chatId,text,disable_web_page_preview:true})});
+ await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:chatId,text,disable_web_page_preview:true,...(replyMarkup?{reply_markup:replyMarkup}:{})}));
 }
 
 import { runMigrations } from "./migrate.js";
@@ -70,7 +70,7 @@ async function configureTelegramWebhook(){
  const r=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:webhookUrl,secret_token:secret,allowed_updates:["pre_checkout_query","message"],drop_pending_updates:false})});
  const data=await r.json() as {ok:boolean;description?:string};
  if(!data.ok)throw new Error(data.description||"Telegram setWebhook failed");
- const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть ЧИПОК"},{command:"help",description:"Помощь"},{command:"terms",description:"Условия покупки"},{command:"support",description:"Поддержка"}]})});
+ const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть ЧИПОК"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь"},{command:"terms",description:"Условия покупки"},{command:"support",description:"Поддержка"}]})});
  const commandsData=await commands.json() as {ok:boolean;description?:string};
  if(!commandsData.ok)app.log.warn({description:commandsData.description},"Telegram commands registration failed");
  app.log.info({webhookUrl},"Telegram payment webhook configured");
@@ -405,7 +405,11 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
  const update:any=req.body;
  if(update.message?.text && update.message?.from?.id){
   const command=String(update.message.text).trim().split(/\\s+/)[0].toLowerCase();
-  if(command==="/start"||command==="/help")await telegramSendMessage(update.message.chat.id,"ЧИПОК — маркетплейс внутри Telegram.\n\n/shop — открыть каталог\n/terms — условия покупки\n/support — поддержка по заказам");
+  if(command==="/start"||command==="/shop"){
+   const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
+   await telegramSendMessage(update.message.chat.id,"ЧИПОК — маркетплейс внутри Telegram.\n\nОткрой каталог и выбирай товары.",webAppUrl?{inline_keyboard:[[{text:"🛍 Открыть ЧИПОК",web_app:{url:webAppUrl}}]]}:undefined);
+  }
+  if(command==="/help")await telegramSendMessage(update.message.chat.id,"ЧИПОК — маркетплейс внутри Telegram.\n\n/shop — открыть каталог\n/terms — условия покупки\n/support — поддержка по заказам");
   if(command==="/terms")await telegramSendMessage(update.message.chat.id,"Условия покупки ЧИПОК: покупка подтверждается после успешной оплаты; продавец подтверждает наличие; получение — встреча или самовывоз; спор и возврат рассматриваются через поддержку. Подробные правила доступны в приложении ЧИПОК.");
   if(command==="/support")await telegramSendMessage(update.message.chat.id,"Поддержка ЧИПОК: откройте раздел «Заказы» в Mini App и создайте спор по нужному заказу. Для платежных вопросов укажите номер заказа и описание проблемы.");
  }
