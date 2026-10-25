@@ -188,8 +188,11 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
   if(!existing){
     await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'sale',$3,$4,'Продажа через ЧИПОК'),($1,$2,'commission',-$5,$4,'Комиссия ЧИПОК')",
       [seller.id,so.order_id,Number(sellerOrder.seller_amount_minor)+Number(sellerOrder.platform_fee_minor),sellerOrder.currency,Number(sellerOrder.platform_fee_minor)]);
-    await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия ЧИПОК') on conflict do nothing",
-      [so.order_id,Number(sellerOrder.platform_fee_minor),sellerOrder.currency]);
+  }
+  const completedOrder=(await c.query("select status,platform_fee_minor,currency from orders where id=$1",[so.order_id])).rows[0];
+  if(completedOrder?.status==="completed"){
+    await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия ЧИПОК') on conflict (order_id,type) do nothing",
+      [so.order_id,Number(completedOrder.platform_fee_minor),completedOrder.currency]);
   }
   await c.query("update seller_profiles set completed_sales=completed_sales+1 where user_id=$1",[seller.id]);
   await c.query("insert into notifications(user_id,type,title,body) values($1,'order_completed','Заказ завершён','Получение заказа подтверждено')",[so.buyer_id]);
