@@ -93,7 +93,10 @@ export default function Home(){
     if(!r.ok)throw new Error((await r.json()).error||"Не удалось создать заказ");
     const data=await r.json();
     const pr=await fetch(api()+"/api/orders/"+data.order.id+"/payment",{method:"POST",headers:authHeaders()});
-    if(!pr.ok)throw new Error((await pr.json()).error||"Не удалось создать оплату");
+    if(!pr.ok){
+      let body:any=null; try{body=await pr.json()}catch{}
+      throw new Error(body?.error||("Ошибка оплаты ("+pr.status+")"));
+    }
     const payment=await pr.json();
     if(!payment.invoiceLink||typeof tg.openInvoice!=="function")throw new Error("Telegram payment window is unavailable");
     const orderId=String(data.order.id);
