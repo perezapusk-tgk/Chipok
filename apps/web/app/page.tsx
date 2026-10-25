@@ -40,6 +40,7 @@ export default function Home(){
  const authHeaders=():Record<string,string>=>{const initData=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";const headers:Record<string,string>={};if(initData)headers.Authorization="tma "+initData;return headers;};
 
  const [booted,setBooted]=useState(false);
+ const [favoriteIds,setFavoriteIds]=useState<Set<string>>(new Set());
  useEffect(()=>{
    let alive=true;
    try{tg?.ready?.();tg?.expand?.();}catch{}
@@ -62,11 +63,10 @@ export default function Home(){
  async function loadNotifications(){const r=await fetch(api()+"/api/notifications",{headers:authHeaders()});if(r.ok)setNotifications((await r.json()).items||[])}
  async function readNotification(id:string){const r=await fetch(api()+"/api/notifications/"+id+"/read",{method:"POST",headers:authHeaders()});if(r.ok)setNotifications(prev=>prev.map(n=>n.id===id?{...n,read_at:new Date().toISOString()}:n))}
  async function loadSeller(){const r=await fetch(api()+"/api/seller/products",{headers:authHeaders()});if(r.ok)setSellerProducts((await r.json()).items||[])}
- if(!booted) return <div className="app"><main className="shell boot"><div className="boot-logo"><img src="/chipok-logo.svg" alt="ЧИПОК" onError={e=>{e.currentTarget.style.display="none"}}/></div><h1>ЧИПОК</h1><p>Загружаем маркетплейс…</p></main></div>;
  const items=useMemo(()=>products.filter(p=>(cat==="Все"||p.category===cat)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[products,cat,q]);
  const total=cart.reduce((s,p)=>s+(p.price_minor??Math.round((p.price||0)*100)),0);
  const add=(p:Product)=>setCart(c=>[...c,p]);
- const [favoriteIds,setFavoriteIds]=useState<Set<string>>(new Set());
+ if(!booted) return <div className="app"><main className="shell boot"><div className="boot-logo"><img src="/chipok-logo.svg" alt="ЧИПОК" onError={e=>{e.currentTarget.style.display="none"}}/></div><h1>ЧИПОК</h1><p>Загружаем маркетплейс…</p></main></div>;
  const loadFavorites=async()=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init)return;const r=await fetch(api()+"/api/favorites",{headers:{Authorization:"tma "+init}});if(r.ok){const d=await r.json();setFavoriteIds(new Set((d.items||d||[]).map((x:any)=>x.product_id||x.id)))}}; 
  const toggleFavorite=async(p:Product)=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init){setMessage("Открой ЧИПОК внутри Telegram.");return}const isFav=favoriteIds.has(p.id);const r=await fetch(api()+"/api/favorites/"+p.id,{method:isFav?"DELETE":"POST",headers:{Authorization:"tma "+init}});if(!r.ok){setMessage("Не удалось изменить избранное");return}setFavoriteIds(prev=>{const n=new Set(prev);if(isFav)n.delete(p.id);else n.add(p.id);return n});setMessage(isFav?"Удалено из избранного":"Товар добавлен в избранное.");};
  const checkout=async()=>{
