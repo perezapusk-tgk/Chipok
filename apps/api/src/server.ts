@@ -75,7 +75,13 @@ async function configureTelegramWebhook(){
  const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть ЧИПОК"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь"},{command:"terms",description:"Условия покупки"},{command:"support",description:"Поддержка"}]})});
  const commandsData=await commands.json() as {ok:boolean;description?:string};
  if(!commandsData.ok)app.log.warn({description:commandsData.description},"Telegram commands registration failed");
- app.log.info({webhookUrl},"Telegram payment webhook configured");
+ const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
+ if(webAppUrl){
+   const menu=await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({menu_button:{type:"web_app",text:"🛍 ЧИПОК",web_app:{url:webAppUrl}}})});
+   const menuData=await menu.json() as {ok:boolean;description?:string};
+   if(!menuData.ok)app.log.warn({description:menuData.description},"Telegram menu button registration failed");
+ }
+ app.log.info({webhookUrl,webAppUrl},"Telegram webhook and Mini App menu configured");
 }
 
 app.get("/api/me",async(req)=>({user:await auth(req)}));
@@ -401,6 +407,8 @@ app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders(
  if(result.kind==="expired"){await expireUnpaidOrders();return reply.code(409).send({error:"Order expired"});}
  return {invoiceLink:result.invoiceLink,provider:"paymaster"};
 });
+
+app.get("/api/payments/telegram/webhook",async()=>({ok:true,route:"telegram-payment-webhook",method:"POST",message:"Этот адрес предназначен для Telegram webhook. Mini App должен открываться по TELEGRAM_WEBAPP_URL."}));
 
 app.post("/api/payments/telegram/webhook",async(req,reply)=>{
  const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;if(!secret)return reply.code(503).send({error:"Payment webhook secret is not configured"});if(req.headers["x-telegram-bot-api-secret-token"]!==secret)return reply.code(401).send({error:"Unauthorized"});
