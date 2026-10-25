@@ -86,7 +86,7 @@ export default function Home(){
     setMessage("Открываем оплату PayMaster TEST…");
     tg.openInvoice(payment.invoiceLink,(status)=>{
       if(status==="paid"){
-        setCart([]);setTab("orders");setMessage("Оплата получена. Заказ передан продавцу на подтверждение.");loadOrders();
+        setMessage("Telegram сообщил об оплате. Проверяем подтверждение на сервере…");loadOrders();
       }else if(status==="cancelled"){
         setMessage("Оплата отменена. Заказ сохранён на 30 минут — можно открыть оплату снова.");
       }else if(status==="failed"){
@@ -104,9 +104,11 @@ export default function Home(){
         const list=(await rr.json()).items||[];
         const current=list.find((o:any)=>o.id===orderId);
         if(current?.status&&current.status!=="created"){
-          setOrders(list);setCart([]);
+          setOrders(list);
           if(["paid","seller_confirmed","ready_for_handover","completed"].includes(current.status)){
-            setTab("orders");setMessage("Оплата подтверждена. Заказ отображается в разделе «Заказы».");
+            setCart([]);setTab("orders");setMessage("Оплата подтверждена сервером. Заказ передан продавцу.");
+          }else if(["cancelled","refunded","disputed","refund_pending"].includes(current.status)){
+            setTab("orders");setMessage("Заказ получил статус: "+statusRu(current.status)+". Открой его в разделе «Заказы».");loadOrders();
           }
           return;
         }
