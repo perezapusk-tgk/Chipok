@@ -385,7 +385,6 @@ app.patch("/api/seller/products/:id",async(req,reply)=>{
  const updated=await withTransaction(async(c)=>{
   const p=(await c.query("select id,status from products where id=$1 and seller_id=$2 for update",[id,seller.id])).rows[0];
   if(!p)return {kind:"not_found" as const};
-  if(Number(active?.n||0)>0 && body.stock<0)return {kind:"active" as const};
   await c.query("update products set title=$1,description=$2,price_minor=$3,category_id=$4,fulfillment_type=$5,status='published',updated_at=now() where id=$6",[body.title,body.description||null,body.priceMinor,body.categoryId||null,body.fulfillmentType,id]);
   await c.query("update inventory set stock=$1,updated_at=now() where product_id=$2",[body.stock,id]);
   if(body.imageUrl){await c.query("delete from product_images where product_id=$1",[id]);await c.query("insert into product_images(product_id,url,sort_order) values($1,$2,0)",[id,body.imageUrl]);}
