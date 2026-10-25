@@ -322,8 +322,9 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
     }
     await c.query("update seller_orders set status='refunded' where order_id=$1 and status<>'completed'",[d.order_id]);
     await c.query("update orders set status='refunded',updated_at=now() where id=$1",[d.order_id]);
-    await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'order_refunded','Заказ возвращён','Средства по спору возвращены.' from orders where id=$1",[d.order_id]);
-    await c.query("insert into notifications(user_id,type,title,body) select so.seller_id,'order_refunded','Возврат по спору','По заказу оформлен возврат средств.' from seller_orders so where so.order_id=$1",[d.order_id]);
+    await c.query("update payments set status='refund_pending',updated_at=now() where order_id=$1 and status='paid'",[d.order_id]);
+    await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'refund_pending','Возврат оформлен','Возврат зарегистрирован и ожидает подтверждения платёжного провайдера.' from orders where id=$1",[d.order_id]);
+    await c.query("insert into notifications(user_id,type,title,body) select so.seller_id,'refund_pending','Возврат по спору','По заказу зарегистрирован возврат. Выплата продавцу не производится до завершения возврата.' from seller_orders so where so.order_id=$1",[d.order_id]);
    }
   } else {
    const restored=d.previous_order_status||"completed";
@@ -333,7 +334,7 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
    }
   }
   await c.query("insert into admin_actions(admin_id,action,target_type,target_id,metadata) values($1,$2,$3,$4,$5)",[admin.id,"resolve_dispute","dispute",id,JSON.stringify({resolution:body.resolution,note:body.note||null})]);
-  return {id,status:"resolved",resolution:body.resolution};
+  return {id,status:"resolved",resolution:body.resolution,refundStatus:body.resolution==="refund"?"refund_pending":undefined};
  });
  if(!result)return reply.code(404).send({error:"Dispute not found"});
  return result;
@@ -400,7 +401,7 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
  if(update.message?.successful_payment){
   const sp=update.message.successful_payment;const payload=sp.invoice_payload;
   await withTransaction(async(c)=>{
-   const p=(await c.query(`select p.*,o.buyer_id,o.status as order_status,o.expires_at from payments p join orders o on o.id=p.order_id where p.payload=$1 for update`,[payload])).rows[0];if(!p||p.order_status!=="created")return; if(p.expires_at && new Date(p.expires_at).getTime()<=Date.now()) return;
+   const p=(await c.query(`select p.*,o.buyer_id,o.status as order_status,o.expires_at from payments p join orders o on o.id=p.order_id where p.payload=$1 for update`,[payload])).rows[0];if(!p||p.order_status!=="created")return; if(p.expires_at && new Date(p.expires_at).getTime()<=Date.now()){await c.query("update payments set status='refund_pending',updated_at=now() where id=$1 and status<>'refunded'",[p.id]);await c.query("update orders set status='disputed',updated_at=now() where id=$1 and status='created'",[p.order_id]);return;}
    const u=(await c.query("select id from users where telegram_id=$1",[update.message.from?.id])).rows[0];if(!u||u.id!==p.buyer_id)throw new Error("Payment buyer mismatch");
    if(Number(p.amount_minor)!==Number(sp.total_amount)||p.currency!==sp.currency)throw new Error("Payment amount mismatch");
    const eventId=String(sp.telegram_payment_charge_id||sp.provider_payment_charge_id||"");if(!eventId)throw new Error("Missing payment event id");
