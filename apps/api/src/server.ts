@@ -409,6 +409,36 @@ app.get("/api/seller/balance",async(req,reply)=>{
  const r=await pool.query("select coalesce((select sum(amount_minor) from ledger_entries where seller_id=$1 and type in ('sale','adjustment','refund','payout')),0) as available_minor,coalesce((select sum(so.seller_amount_minor) from seller_orders so where so.seller_id=$1 and so.status in ('paid','seller_confirmed','ready_for_handover')),0) as pending_minor",[seller.id]);
  return {availableMinor:Number(r.rows[0].available_minor||0),pendingMinor:Number(r.rows[0].pending_minor||0),currency:"RUB"};
 });
+
+app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
+ const seller=await auth(req);if(seller.role!=="seller")return reply.code(403).send({error:"Seller access required"});
+ const id=z.string().uuid().parse((req.params as any).id);
+ const result=await withTransaction(async(c)=>{
+  const so=(await c.query("select so.*,o.buyer_id,o.status as order_status from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
+  if(!so)return null;if(so.status!=="paid"||so.order_status!=="paid")throw Object.assign(new Error("Заказ нельзя подтвердить в текущем статусе"),{statusCode:409});
+  await c.query("update seller_orders set status='seller_confirmed' where id=$1",[id]);
+  await c.query("update orders set status='seller_confirmed',updated_at=now() where id=$1 and status='paid'",[so.order_id]);
+  await c.query("insert into notifications(user_id,type,title,body) values($1,'seller_confirmed','Продавец подтвердил заказ','Продавец подтвердил наличие товара. Договоритесь о получении в чате.')",[so.buyer_id]);
+  return {id,status:"seller_confirmed"};
+ });
+ if(!result)return reply.code(404).send({error:"Seller order not found"});return result;
+});
+app.post("/api/seller-orders/:id/reject",async(req,reply)=>{
+ const seller=await auth(req);if(seller.role!=="seller")return reply.code(403).send({error:"Seller access required"});
+ const id=z.string().uuid().parse((req.params as any).id);
+ const result=await withTransaction(async(c)=>{
+  const so=(await c.query("select so.*,o.buyer_id from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
+  if(!so)return null;if(!["paid","seller_confirmed"].includes(so.status))throw Object.assign(new Error("Заказ нельзя отменить в текущем статусе"),{statusCode:409});
+  await c.query("update inventory i set reserved=greatest(0,i.reserved-oi.quantity),updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[id]);
+  await c.query("update seller_orders set status='cancelled' where id=$1",[id]);
+  await c.query("update orders set status='cancelled',updated_at=now() where id=$1",[so.order_id]);
+  await c.query("update payments set status='refund_pending',updated_at=now() where order_id=$1 and status='paid'",[so.order_id]);
+  await c.query("insert into refunds(order_id,payment_id,amount_minor,currency,status,reason) select o.id,p.id,o.total_minor,o.currency,'pending','Продавец не подтвердил наличие товара' from orders o join payments p on p.order_id=o.id where o.id=$1 on conflict(order_id) do nothing",[so.order_id]);
+  await c.query("insert into notifications(user_id,type,title,body) values($1,'refund_pending','Заказ отменён продавцом','Продавец не подтвердил наличие товара. Возврат ожидает подтверждения платёжного провайдера.')",[so.buyer_id]);
+  return {id,status:"cancelled"};
+ });
+ if(!result)return reply.code(404).send({error:"Seller order not found"});return result;
+});
 app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const result=await withTransaction(async(c)=>{
