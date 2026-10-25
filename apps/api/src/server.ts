@@ -376,12 +376,22 @@ app.get("/api/seller/orders",async(req)=>{
 app.get("/api/seller/products",async(req)=>{
  const seller=await auth(req);const r=await pool.query("select p.id,p.title,p.price_minor,p.currency,p.status,p.fulfillment_type,p.created_at,i.stock,i.reserved from products p join inventory i on i.product_id=p.id where p.seller_id=$1 order by p.created_at desc",[seller.id]);return {items:r.rows};
 });
+app.get("/api/images/search",async(req,reply)=>{
+ const q=z.object({q:z.string().trim().min(2).max(120),limit:z.coerce.number().int().min(1).max(12).default(8)}).parse(req.query);
+ try{
+  const url="https://api.openverse.org/v1/images/?q="+encodeURIComponent(q.q)+"&page_size="+q.limit;
+  const r=await fetch(url,{headers:{"accept":"application/json"}});
+  if(!r.ok)return reply.code(502).send({error:"Не удалось найти изображения"});
+  const data:any=await r.json();
+  return {items:(data.results||[]).map((x:any)=>({id:x.id,title:x.title||"",thumbnail:x.thumbnail||x.url,image:x.url||x.thumbnail,creator:x.creator||"",license:x.license||"",licenseUrl:x.license_url||"",source:x.foreign_landing_url||x.detail_url||""})).filter((x:any)=>x.image)};
+ }catch{return reply.code(502).send({error:"Поиск изображений временно недоступен"});}
+});
 app.post("/api/seller/products",async(req,reply)=>{
  const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
  const reliability=await pool.query("select reliability_score from seller_profiles where user_id=$1",[seller.id]);
  const reliabilityScore=Number(reliability.rows[0]?.reliability_score ?? 0);
  if(reliabilityLevel(reliabilityScore)==="blocked")return reply.code(403).send({error:"Публикация товаров заблокирована из-за низкой надёжности продавца"});
- const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB"),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().url().optional()}).parse(req.body);
+ const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB"),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().refine(v=>v.startsWith("data:image/")||/^https?:\\/\\//.test(v),"Invalid image URL").optional()}).parse(req.body);
  const slug=body.title.toLowerCase().replace(/[^a-zа-я0-9]+/gi,"-").replace(/^-|-$/g,"")+"-"+randomUUID().slice(0,8);
  const product=await withTransaction(async(c)=>{
   let store=(await c.query("select id from stores where seller_id=$1",[seller.id])).rows[0];
