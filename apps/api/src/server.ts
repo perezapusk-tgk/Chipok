@@ -396,10 +396,10 @@ app.post("/api/seller/products",async(req,reply)=>{
  const product=await withTransaction(async(c)=>{
   let store=(await c.query("select id from stores where seller_id=$1",[seller.id])).rows[0];
   if(!store)store=(await c.query("insert into stores(seller_id,name) values($1,$2) returning id",[seller.id,seller.first_name||"Магазин"])).rows[0];
-  const p=(await c.query("insert into products(seller_id,store_id,category_id,title,slug,description,price_minor,currency,status,fulfillment_type) values($1,$2,$3,$4,$5,$6,$7,$8,'draft',$9) returning id,title,price_minor,currency,status,fulfillment_type",[seller.id,store.id,body.categoryId||null,body.title,slug,body.description||null,body.priceMinor,body.currency.toUpperCase(),body.fulfillmentType])).rows[0];
+  const p=(await c.query("insert into products(seller_id,store_id,category_id,title,slug,description,price_minor,currency,status,fulfillment_type) values($1,$2,$3,$4,$5,$6,$7,$8,'published',$9) returning id,title,price_minor,currency,status,fulfillment_type",[seller.id,store.id,body.categoryId||null,body.title,slug,body.description||null,body.priceMinor,body.currency.toUpperCase(),body.fulfillmentType])).rows[0];
   await c.query("insert into inventory(product_id,stock) values($1,$2)",[p.id,body.stock]);
   if(body.imageUrl)await c.query("insert into product_images(product_id,url,sort_order) values($1,$2,0)",[p.id,body.imageUrl]);
-  await c.query("insert into moderation_queue(product_id,status) values($1,'pending')",[p.id]);
+  await c.query("insert into moderation_queue(product_id,status,reason,reviewed_at) values($1,'approved','Автопубликация товара продавца',now())",[p.id]);
   return p;
  });
  return reply.code(201).send({product});
