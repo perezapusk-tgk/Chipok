@@ -198,7 +198,7 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
   if(!h||h.used_at||hashHandover(body.code)!==h.code_hash)throw Object.assign(new Error("Invalid handover code"),{statusCode:403});
   await c.query("update handover_codes set used_at=now() where id=$1",[h.id]);
   await c.query("update seller_orders set status='completed' where id=$1",[id]);
-  await c.query("update orders set status=case when not exists(select 1 from seller_orders where order_id=$1 and status<>'completed') then 'completed' else 'seller_confirmed' end,updated_at=now() where id=$1",[so.order_id]);
+  await c.query("update orders set status=case when not exists(select 1 from seller_orders where order_id=$1 and status<>'completed') then 'completed' when exists(select 1 from seller_orders where order_id=$1 and status='paid') then 'paid' when exists(select 1 from seller_orders where order_id=$1 and status='seller_confirmed') then 'seller_confirmed' when not exists(select 1 from seller_orders where order_id=$1 and status not in ('ready_for_handover','completed')) then 'ready_for_handover' else status end,updated_at=now() where id=$1",[so.order_id]);
   await c.query("update inventory i set reserved=reserved-oi.quantity,stock=stock-oi.quantity,updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[id]);
   const sellerOrder=(await c.query("select seller_id,seller_amount_minor,platform_fee_minor,currency from seller_orders where id=$1",[id])).rows[0];
   const existing=(await c.query("select 1 from ledger_entries where order_id=$1 and seller_id=$2 and type='sale' limit 1",[so.order_id,seller.id])).rowCount;
