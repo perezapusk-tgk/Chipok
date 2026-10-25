@@ -107,9 +107,10 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
   const o=(await c.query("insert into orders(buyer_id,status,total_minor,platform_fee_minor,expires_at) values($1,'created',0,0,now()+interval '30 minutes') returning id",[buyer.id])).rows[0];
   const groups=new Map<string,any>();let total=0,feeTotal=0;let currency:string|null=null;
   for(const item of body.items){
-   const p=(await c.query(`select p.id,p.seller_id,p.title,p.price_minor,p.currency,p.fulfillment_type,i.stock,i.reserved,u.role,s.reliability_score from products p join inventory i on i.product_id=p.id join users u on u.id=p.seller_id left join seller_profiles s on s.user_id=p.seller_id where p.id=$1 and p.status='published' for update of p,i,u`,[item.productId])).rows[0];
+   const p=(await c.query(`select p.id,p.seller_id,p.title,p.price_minor,p.currency,p.fulfillment_type,i.stock,i.reserved,u.role from products p join inventory i on i.product_id=p.id join users u on u.id=p.seller_id where p.id=$1 and p.status='published' for update of p,i,u`,[item.productId])).rows[0];
    if(!p)throw Object.assign(new Error("Product unavailable"),{statusCode:409});
-   const sellerReliability=Number(p.reliability_score ?? 0);
+   const sellerProfile=(await c.query("select reliability_score from seller_profiles where user_id=$1",[p.seller_id])).rows[0];
+   const sellerReliability=Number(sellerProfile?.reliability_score ?? 0);
    if(p.role!=="seller" || sellerReliability<60)throw Object.assign(new Error("Seller is temporarily unavailable for new orders"),{statusCode:409});
    if(p.stock-p.reserved<item.quantity)throw Object.assign(new Error("Insufficient stock"),{statusCode:409});
    if(currency===null)currency=p.currency;else if(currency!==p.currency)throw Object.assign(new Error('All items in one order must use the same currency'),{statusCode:409}); const line=Number(p.price_minor)*item.quantity,fee=Math.floor(line*bps/10000);total+=line;feeTotal+=fee;
