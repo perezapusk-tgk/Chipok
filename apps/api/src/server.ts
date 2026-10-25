@@ -391,7 +391,7 @@ app.post("/api/seller/products",async(req,reply)=>{
  const reliability=await pool.query("select reliability_score from seller_profiles where user_id=$1",[seller.id]);
  const reliabilityScore=Number(reliability.rows[0]?.reliability_score ?? 0);
  if(reliabilityLevel(reliabilityScore)==="blocked")return reply.code(403).send({error:"Публикация товаров заблокирована из-за низкой надёжности продавца"});
- const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB"),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().refine(v=>v.startsWith("data:image/")||/^https?:\\/\\//.test(v),"Invalid image URL").optional()}).parse(req.body);
+ const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB"),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().refine(v=>v.startsWith("data:image/")||v.startsWith("https://")||v.startsWith("http://"),"Invalid image URL").optional()}).parse(req.body);
  const slug=body.title.toLowerCase().replace(/[^a-zа-я0-9]+/gi,"-").replace(/^-|-$/g,"")+"-"+randomUUID().slice(0,8);
  const product=await withTransaction(async(c)=>{
   let store=(await c.query("select id from stores where seller_id=$1",[seller.id])).rows[0];
