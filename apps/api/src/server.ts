@@ -70,6 +70,9 @@ async function configureTelegramWebhook(){
  const r=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:webhookUrl,secret_token:secret,allowed_updates:["pre_checkout_query","message"],drop_pending_updates:false})});
  const data=await r.json() as {ok:boolean;description?:string};
  if(!data.ok)throw new Error(data.description||"Telegram setWebhook failed");
+ const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть ЧИПОК"},{command:"help",description:"Помощь"},{command:"terms",description:"Условия покупки"},{command:"support",description:"Поддержка"}]})});
+ const commandsData=await commands.json() as {ok:boolean;description?:string};
+ if(!commandsData.ok)app.log.warn({description:commandsData.description},"Telegram commands registration failed");
  app.log.info({webhookUrl},"Telegram payment webhook configured");
 }
 
