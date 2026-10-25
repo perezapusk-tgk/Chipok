@@ -43,3 +43,6 @@ body{letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
 .handover-code{box-shadow:0 8px 24px #0003}
 .chat-input{min-height:44px}.menu button{transition:background .15s}.menu button:hover{background:#102029}
 @media(max-width:380px){.card-img{height:142px}.top{margin-bottom:12px}.tagline{max-width:210px}.image-result img{height:86px}}
+
+/* Seller product management */
+.seller-product-main{display:flex;align-items:center;gap:10px;min-width:0}.seller-product-thumb{width:48px;height:48px;object-fit:cover;border-radius:12px;border:1px solid #263a43;background:#0d1a21;flex:0 0 auto}.seller-product-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}.seller-product-actions strong{margin-right:3px}.secondary.danger{color:#e6a0a0;border-color:#503438;background:#21171a}.secondary.danger:hover{background:#2b1b1f;border-color:#6b4148}@media(max-width:520px){.seller-product{align-items:flex-start;flex-direction:column}.seller-product-actions{width:100%;justify-content:flex-start}.seller-product-actions strong{margin-right:auto}.seller-product-actions button{min-height:36px}}
