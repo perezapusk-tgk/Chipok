@@ -230,7 +230,7 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
 app.get("/api/seller/reliability",async(req)=>{const seller=await auth(req);const r=await pool.query("select reliability_score,completed_sales from seller_profiles where user_id=$1",[seller.id]);if(!r.rowCount)return {score:0,level:"blocked",completedSales:0};const score=Number(r.rows[0].reliability_score);return {score,level:reliabilityLevel(score),completedSales:Number(r.rows[0].completed_sales)};});
 app.get("/api/seller/balance",async(req)=>{
  const seller=await auth(req);
- const r=await pool.query("select coalesce(sum(case when type='sale' then amount_minor when type in ('commission','payout') then amount_minor else 0 end),0)::bigint as available from ledger_entries where seller_id=$1",[seller.id]);
+ const r=await pool.query("select coalesce(sum(case when type in ('sale','commission','payout','adjustment') then amount_minor else 0 end),0)::bigint as available from ledger_entries where seller_id=$1",[seller.id]);
  const pending=await pool.query("select coalesce(sum(so.seller_amount_minor),0)::bigint as pending from seller_orders so join orders o on o.id=so.order_id where so.seller_id=$1 and so.status in ('paid','seller_confirmed','ready_for_handover')",[seller.id]);
  const x=r.rows[0];return {currency:"RUB",availableMinor:Number(x.available),pendingMinor:Number(pending.rows[0].pending),totalEarnedMinor:Number(x.available)+Number(pending.rows[0].pending)};
 });
@@ -248,7 +248,7 @@ app.post("/api/seller/payouts",async(req,reply)=>{
   await c.query("select id from users where id=$1 for update",[seller.id]);
   const currency=body.currency.toUpperCase();
   if(currency!=="RUB")throw Object.assign(new Error("Only RUB payouts are supported"),{statusCode:400});
-  const available=await c.query("select coalesce(sum(case when type='sale' then amount_minor when type in ('commission','payout') then amount_minor else 0 end),0)::bigint as n from ledger_entries where seller_id=$1 and currency=$2",[seller.id,currency]);
+  const available=await c.query("select coalesce(sum(case when type in ('sale','commission','payout','adjustment') then amount_minor else 0 end),0)::bigint as n from ledger_entries where seller_id=$1 and currency=$2",[seller.id,currency]);
   const amount=Number(available.rows[0].n);
   if(body.amountMinor>amount)throw Object.assign(new Error("Insufficient available balance"),{statusCode:409});
   const p=(await c.query("insert into payouts(seller_id,amount_minor,currency,status) values($1,$2,$3,'pending') returning *",[seller.id,body.amountMinor,currency])).rows[0];
