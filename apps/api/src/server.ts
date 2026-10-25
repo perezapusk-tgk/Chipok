@@ -462,6 +462,40 @@ app.get("/api/orders/:id/handover",async(req,reply)=>{
  const rows=(await pool.query("select hc.seller_order_id,so.status,hc.created_at,hc.code_encrypted from handover_codes hc join seller_orders so on so.id=hc.seller_order_id join orders o on o.id=so.order_id where o.id=$1 and o.buyer_id=$2",[id,buyer.id])).rows;
  return {items:rows.map((x:any)=>({seller_order_id:x.seller_order_id,status:x.status,created_at:x.created_at,handoverCode:x.status==="ready_for_handover"&&x.code_encrypted?decryptHandover(x.code_encrypted):undefined}))};
 });
+
+app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
+ const seller=await auth(req);if(seller.role!=="seller")return reply.code(403).send({error:"Seller access required"});
+ const id=z.string().uuid().parse((req.params as any).id);const body=z.object({code:z.string().regex(/^\\d{6}$/)}).parse(req.body);
+ const result=await withTransaction(async(c)=>{
+  const so=(await c.query("select so.*,o.buyer_id,o.currency,o.status as order_status from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
+  if(!so)return null;if(so.status!=="ready_for_handover"||so.order_status!=="ready_for_handover")throw Object.assign(new Error("Заказ не готов к выдаче"),{statusCode:409});
+  const hc=(await c.query("select * from handover_codes where seller_order_id=$1 for update",[id])).rows[0];
+  if(!hc||hc.used_at)throw Object.assign(new Error("Код получения недействителен"),{statusCode:409});
+  if(hashHandover(body.code)!==hc.code_hash)throw Object.assign(new Error("Неверный код получения"),{statusCode:409});
+  await c.query("update handover_codes set used_at=now() where id=$1",[hc.id]);
+  await c.query("update seller_orders set status='completed' where id=$1",[id]);
+  await c.query("update orders set status='completed',updated_at=now() where id=$1",[so.order_id]);
+  await c.query("update inventory i set reserved=greatest(0,i.reserved-oi.quantity),stock=greatest(0,i.stock-oi.quantity),updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[id]);
+  await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'sale',$3,$4,'Продажа после подтверждения получения') on conflict(seller_id,order_id,type) where order_id is not null do nothing",[seller.id,so.order_id,Number(so.seller_amount_minor),so.currency]);
+  await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия ЧИПОК') on conflict(order_id,type) where order_id is not null do nothing",[so.order_id,Number(so.platform_fee_minor),so.currency]);
+  await c.query("update seller_profiles set completed_sales=completed_sales+1,reliability_score=least(100,reliability_score+1) where user_id=$1",[seller.id]);
+  await c.query("insert into notifications(user_id,type,title,body) values($1,'order_completed','Заказ завершён','Получение подтверждено. Средства доступны для вывода.')",[so.buyer_id]);
+  return {id,status:"completed",sellerAmountMinor:Number(so.seller_amount_minor)};
+ });
+ if(!result)return reply.code(404).send({error:"Seller order not found"});return result;
+});
+app.post("/api/seller/payouts",async(req,reply)=>{
+ const seller=await auth(req);if(seller.role!=="seller")return reply.code(403).send({error:"Seller access required"});
+ const body=z.object({amountMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB")}).parse(req.body);
+ const result=await withTransaction(async(c)=>{
+  const r=(await c.query("select coalesce(sum(amount_minor),0) as available from ledger_entries where seller_id=$1 and type in ('sale','adjustment','refund','payout')",[seller.id])).rows[0];
+  if(body.amountMinor>Number(r.available||0))throw Object.assign(new Error("Недостаточно средств для вывода"),{statusCode:409});
+  const p=(await c.query("insert into payouts(seller_id,amount_minor,currency,status) values($1,$2,$3,'pending') returning *",[seller.id,body.amountMinor,body.currency.toUpperCase()])).rows[0];
+  await c.query("insert into ledger_entries(seller_id,type,amount_minor,currency,description) values($1,'payout',$2,$3,$4)",[seller.id,-body.amountMinor,body.currency.toUpperCase(),"Вывод средств "+p.id]);
+  return p;
+ });
+ return reply.code(201).send({payout:result});
+});
 app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const result=await withTransaction(async(c)=>{
