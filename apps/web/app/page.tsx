@@ -386,7 +386,7 @@ async function deleteProduct(p:any){
  const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
  const r=await fetch(api()+"/api/seller/products/"+p.id,{method:"DELETE",headers:{Authorization:"tma "+init}});
  if(!r.ok){setMessage((await r.json()).error||"Не удалось удалить товар");return}
- const d=await r.json();loadSeller();setMessage(d.mode==="archived"?"Товар скрыт из каталога, история заказов сохранена.":"Товар удалён.");
+ const d=await r.json();setSellerProducts(prev=>prev.filter(x=>x.id!==p.id));loadSeller();setMessage(d.mode==="archived"?"Товар скрыт из каталога, история заказов сохранена.":"Товар удалён.");
 }
  const activeOrders=sellerOrders.filter(o=>["paid","seller_confirmed","ready_for_handover"].includes(o.status));
  const lowStock=products.filter(p=>Number(p.stock??p.available_stock??0)>0&&Number(p.stock??p.available_stock??0)<=2);
