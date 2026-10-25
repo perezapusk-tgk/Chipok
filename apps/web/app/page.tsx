@@ -36,10 +36,16 @@ export default function Home(){
  const [cart,setCart]=useState<Product[]>([]),[selected,setSelected]=useState<Product|null>(null);
  const [products,setProducts]=useState<Product[]>(process.env.NODE_ENV==="production"?[]:fallback),[orders,setOrders]=useState<Order[]>([]),[user,setUser]=useState<User|null>(null),[categories,setCategories]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]);
  const [sellerProducts,setSellerProducts]=useState<any[]>([]),[loading,setLoading]=useState(false),[message,setMessage]=useState("");
- const tg=typeof window!=="undefined"?window.Telegram?.WebApp:null;
+ const tg=typeof window!=="undefined" ? window.Telegram?.WebApp : undefined;
  const authHeaders=():Record<string,string>=>{const initData=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";const headers:Record<string,string>={};if(initData)headers.Authorization="tma "+initData;return headers;};
 
- useEffect(()=>{tg?.ready();tg?.expand();load();},[]);
+ const [booted,setBooted]=useState(false);
+ useEffect(()=>{
+   let alive=true;
+   try{tg?.ready?.();tg?.expand?.();}catch{}
+   load().finally(()=>{if(alive)setBooted(true)});
+   return()=>{alive=false};
+ },[]);
  async function load(){
    try{
      const r=await fetch(api()+"/api/catalog"); if(r.ok){const d=await r.json(); setProducts((d.items||[]).map((p:any)=>({...p,price:p.price_minor/100,image:p.image_url})))} else if(process.env.NODE_ENV!=="production"){setProducts(fallback)}
@@ -47,12 +53,16 @@ export default function Home(){
      const cr=await fetch(api()+"/api/categories"); if(cr.ok){const d=await cr.json();setCategories(d.items||[])}
      await loadFavorites();
      await loadNotifications();
-   }catch{if(process.env.NODE_ENV==="production")setProducts([])}
+   }catch{
+     if(process.env.NODE_ENV==="production")setProducts([]);
+     setMessage("Не удалось загрузить данные. Каталог можно открыть после повторной попытки.");
+   }
  }
  async function loadOrders(){const r=await fetch(api()+"/api/orders",{headers:authHeaders()});if(r.ok)setOrders((await r.json()).items||[])}
  async function loadNotifications(){const r=await fetch(api()+"/api/notifications",{headers:authHeaders()});if(r.ok)setNotifications((await r.json()).items||[])}
  async function readNotification(id:string){const r=await fetch(api()+"/api/notifications/"+id+"/read",{method:"POST",headers:authHeaders()});if(r.ok)setNotifications(prev=>prev.map(n=>n.id===id?{...n,read_at:new Date().toISOString()}:n))}
  async function loadSeller(){const r=await fetch(api()+"/api/seller/products",{headers:authHeaders()});if(r.ok)setSellerProducts((await r.json()).items||[])}
+ if(!booted) return <div className="app"><main className="shell boot"><div className="boot-logo"><img src="/chipok-logo.svg" alt="ЧИПОК" onError={e=>{e.currentTarget.style.display="none"}}/></div><h1>ЧИПОК</h1><p>Загружаем маркетплейс…</p></main></div>;
  const items=useMemo(()=>products.filter(p=>(cat==="Все"||p.category===cat)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[products,cat,q]);
  const total=cart.reduce((s,p)=>s+(p.price_minor??Math.round((p.price||0)*100)),0);
  const add=(p:Product)=>setCart(c=>[...c,p]);
