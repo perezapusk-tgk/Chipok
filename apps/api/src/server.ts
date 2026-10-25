@@ -390,8 +390,10 @@ app.post("/api/seller/products",async(req,reply)=>{
 app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const result=await withTransaction(async(c)=>{
-  const order=(await c.query("select o.id,o.total_minor,o.currency,o.status,o.buyer_id,o.expires_at,coalesce(min(oi.title_snapshot),'Заказ ЧИПОК') as first_title from orders o left join seller_orders so on so.order_id=o.id left join order_items oi on oi.seller_order_id=so.id where o.id=$1 group by o.id for update",[id])).rows[0];
+  const order=(await c.query("select id,total_minor,currency,status,buyer_id,expires_at from orders where id=$1 for update",[id])).rows[0];
   if(!order||order.buyer_id!==buyer.id)return {kind:"not_found" as const};
+  const titleRow=(await c.query("select coalesce(min(oi.title_snapshot),'Заказ ЧИПОК') as first_title from seller_orders so left join order_items oi on oi.seller_order_id=so.id where so.order_id=$1",[id])).rows[0];
+  order.first_title=titleRow?.first_title||"Заказ ЧИПОК";
   if(order.status!=="created")return {kind:"not_payable" as const};
   if(order.expires_at&&new Date(order.expires_at).getTime()<=Date.now())return {kind:"expired" as const};
   const existing=(await c.query("select status,payload,invoice_link,amount_minor,currency,provider from payments where order_id=$1 for update",[id])).rows[0];
