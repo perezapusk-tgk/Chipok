@@ -439,6 +439,29 @@ app.post("/api/seller-orders/:id/reject",async(req,reply)=>{
  });
  if(!result)return reply.code(404).send({error:"Seller order not found"});return result;
 });
+
+app.post("/api/seller-orders/:id/ready",async(req,reply)=>{
+ const seller=await auth(req);if(seller.role!=="seller")return reply.code(403).send({error:"Seller access required"});
+ const id=z.string().uuid().parse((req.params as any).id);
+ const result=await withTransaction(async(c)=>{
+  const so=(await c.query("select so.*,o.buyer_id from seller_orders so join orders o on o.id=so.order_id where so.id=$1 and so.seller_id=$2 for update",[id,seller.id])).rows[0];
+  if(!so)return null;if(so.status!=="seller_confirmed")throw Object.assign(new Error("Сначала подтвердите заказ"),{statusCode:409});
+  const existing=(await c.query("select id from handover_codes where seller_order_id=$1",[id])).rows[0];
+  if(existing)throw Object.assign(new Error("Код получения уже создан"),{statusCode:409});
+  const code=makeHandoverCode();
+  await c.query("insert into handover_codes(seller_order_id,code_hash) values($1,$2)",[id,hashHandover(code)]);
+  await c.query("update seller_orders set status='ready_for_handover' where id=$1",[id]);
+  await c.query("update orders set status='ready_for_handover',updated_at=now() where id=$1",[so.order_id]);
+  await c.query("insert into notifications(user_id,type,title,body) values($1,'handover_ready','Заказ готов к получению','Продавец подготовил заказ. Открой карточку заказа, чтобы увидеть код получения.')",[so.buyer_id]);
+  return {id,status:"ready_for_handover",handoverCode:code};
+ });
+ if(!result)return reply.code(404).send({error:"Seller order not found"});return result;
+});
+app.get("/api/orders/:id/handover",async(req,reply)=>{
+ const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
+ const rows=(await pool.query("select hc.seller_order_id,so.status,hc.created_at from handover_codes hc join seller_orders so on so.id=hc.seller_order_id join orders o on o.id=so.order_id where o.id=$1 and o.buyer_id=$2",[id,buyer.id])).rows;
+ return {items:rows.map((x:any)=>({seller_order_id:x.seller_order_id,status:x.status,created_at:x.created_at}))};
+});
 app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const result=await withTransaction(async(c)=>{
