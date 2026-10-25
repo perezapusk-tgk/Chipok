@@ -81,7 +81,38 @@ export default function Home(){
     const pr=await fetch(api()+"/api/orders/"+data.order.id+"/payment",{method:"POST",headers:authHeaders()});
     if(!pr.ok)throw new Error((await pr.json()).error||"Не удалось создать оплату");
     const payment=await pr.json();
-    tg.openInvoice?.(payment.invoiceLink,(status)=>{if(status==="paid"){setCart([]);setTab("orders");loadOrders()}});
+    if(!payment.invoiceLink||typeof tg.openInvoice!=="function")throw new Error("Telegram payment window is unavailable");
+    const orderId=String(data.order.id);
+    setMessage("Открываем оплату PayMaster TEST…");
+    tg.openInvoice(payment.invoiceLink,(status)=>{
+      if(status==="paid"){
+        setCart([]);setTab("orders");setMessage("Оплата получена. Заказ передан продавцу на подтверждение.");loadOrders();
+      }else if(status==="cancelled"){
+        setMessage("Оплата отменена. Заказ сохранён на 30 минут — можно открыть оплату снова.");
+      }else if(status==="failed"){
+        setMessage("Оплата не прошла. Попробуй ещё раз из заказа.");
+      }else{
+        setMessage("Ожидаем подтверждение оплаты…");
+      }
+    });
+    const started=Date.now();
+    const poll=async()=>{
+      while(Date.now()-started<30000){
+        await new Promise(resolve=>setTimeout(resolve,2000));
+        const rr=await fetch(api()+"/api/orders",{headers:authHeaders()});
+        if(!rr.ok)continue;
+        const list=(await rr.json()).items||[];
+        const current=list.find((o:any)=>o.id===orderId);
+        if(current?.status&&current.status!=="created"){
+          setOrders(list);setCart([]);
+          if(["paid","seller_confirmed","ready_for_handover","completed"].includes(current.status)){
+            setTab("orders");setMessage("Оплата подтверждена. Заказ отображается в разделе «Заказы».");
+          }
+          return;
+        }
+      }
+    };
+    void poll();
    }catch(e){setMessage(e instanceof Error?e.message:"Ошибка оплаты")}finally{setLoading(false)}
  };
  if(selected)return <div className="app"><main className="shell detail"><button className="icon-btn back" onClick={()=>setSelected(null)}>←</button><div className="detail-image"><img src={selected.image||selected.image_url||""} alt=""/></div><h1>{selected.title}</h1><div className="rating"><b>★ {selected.rating||"—"}</b> {selected.reviews?"("+selected.reviews+" отзыва)":""}</div><div className="seller">♙ {selected.seller||"Продавец ЧИПОК"}</div><div className="price">{money(selected.price_minor??Math.round((selected.price||0)*100),selected.currency)}</div><div className="meta"><div>Наличие<b>{(selected.available_stock??1)>0?"В наличии":"Нет"}</b></div><div>Формат<b>Самовывоз</b></div><div>Комиссия<b>5% с продавца</b></div></div><p className="desc">{selected.description||"Товар из каталога ЧИПОК. Место и время получения покупатель согласовывает с продавцом в чате."}</p><div className="row" style={{gap:8}}>{selected.seller_id&&<button className="secondary wide" onClick={async()=>{const r=await fetch(api()+"/api/chat/threads",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({sellerId:selected.seller_id,productId:selected.id})});if(r.ok){setMessage("Чат с продавцом открыт. Перейди во вкладку «Чаты».");setTab("chat")}else setMessage("Не удалось открыть чат с продавцом")}}>Написать продавцу</button>}<button className="primary wide sticky-buy" onClick={()=>{add(selected);setSelected(null)}}>Добавить в корзину</button></div></main></div>;
@@ -201,7 +232,7 @@ function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}) {
  </div>;
 }
 
-function statusRu(s:string){return ({created:"Ожидает оплаты",paid:"Оплачен",seller_confirmed:"Продавец подтвердил",ready_for_handover:"Готов к получению",completed:"Завершён",cancelled:"Отменён",refunded:"Возврат",disputed:"Спор"} as Record<string,string>)[s]||s}
+function statusRu(s:string){return ({created:"Ожидает оплаты",paid:"Оплачен",seller_confirmed:"Продавец подтвердил",ready_for_handover:"Готов к получению",completed:"Завершён",cancelled:"Отменён",refunded:"Возврат",refund_pending:"Возврат ожидает подтверждения",disputed:"Спор"} as Record<string,string>)[s]||s}
 
 function Profile({user,sellerProducts,loadSeller,setMessage,categories,notifications,readNotification}:{user:User|null;sellerProducts:any[];loadSeller:()=>void;setMessage:(s:string)=>void;categories:any[];notifications:any[];readNotification:(id:string)=>Promise<void>}){
  const seller=user?.role==="seller";
