@@ -6,7 +6,7 @@ import type { Dispatch, SetStateAction } from "react";
 type Product = {
   id:string; title:string; price_minor?:number; price?:number; currency?:string;
   seller?:string; seller_id?:string; rating?:number; reviews?:number; category?:string; category_id?:string; image?:string;
-  image_url?:string; available_stock?:number; status?:string; description?:string;
+  image_url?:string; available_stock?:number; status?:string; description?:string; fulfillment_type?:"meeting"|"pickup";
 };
 type Order = { id:string; status:string; total_minor:number; currency:string; created_at:string; seller_orders:any[] };
 type User = { id:string; first_name:string; username?:string; role:string };
