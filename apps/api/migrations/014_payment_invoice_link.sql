@@ -5,18 +5,3 @@ create index if not exists idx_payments_status_updated on payments(status,update
 create index if not exists idx_payouts_status_created on payouts(status,created_at desc);
 
 alter table payments add column if not exists invoice_link text;
-
--- Make seller and platform ledger writes idempotent per order.
-delete from ledger_entries a using ledger_entries b
-where a.order_id is not null and a.order_id=b.order_id and a.seller_id=b.seller_id and a.type=b.type and a.id>b.id;
-
-delete from platform_ledger_entries a using platform_ledger_entries b
-where a.order_id is not null and a.order_id=b.order_id and a.type=b.type and a.id>b.id;
-
-create unique index if not exists uq_ledger_order_seller_type
-  on ledger_entries(order_id,seller_id,type)
-  where order_id is not null;
-
-create unique index if not exists uq_platform_ledger_order_type
-  on platform_ledger_entries(order_id,type)
-  where order_id is not null;
