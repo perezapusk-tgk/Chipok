@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type Product = {
   id:string; title:string; price_minor?:number; price?:number; currency?:string;
-  seller?:string; seller_id?:string; rating?:number; reviews?:number; category?:string; image?:string;
+  seller?:string; seller_id?:string; rating?:number; reviews?:number; category?:string; category_id?:string; image?:string;
   image_url?:string; available_stock?:number; status?:string; description?:string;
 };
 type Order = { id:string; status:string; total_minor:number; currency:string; created_at:string; seller_orders:any[] };
