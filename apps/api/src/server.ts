@@ -178,6 +178,11 @@ app.post("/api/seller-orders/:id/ready",async(req,reply)=>{
   if(!so)return null;
   if(so.status!=="seller_confirmed")throw Object.assign(new Error("Сначала подтвердите наличие заказа"),{statusCode:409});
   await c.query("update seller_orders set status='ready_for_handover' where id=$1",[id]);
+  const handover=(await c.query("select id from handover_codes where seller_order_id=$1 for update",[id])).rows[0];
+  if(!handover){
+   const code=makeHandoverCode();
+   await c.query("insert into handover_codes(seller_order_id,code_hash,code_encrypted) values($1,$2,$3)",[id,hashHandover(code),encryptHandover(code)]);
+  }
   const pending=await c.query("select count(*)::int as n from seller_orders where order_id=$1 and status not in ('ready_for_handover','completed')",[so.order_id]);
   if(Number(pending.rows[0].n)===0)await c.query("update orders set status='ready_for_handover',updated_at=now() where id=$1",[so.order_id]);
   await c.query("insert into notifications(user_id,type,title,body) values($1,'order_ready','Заказ готов к получению','Покажи продавцу код получения из раздела «Заказы».')",[so.buyer_id]);
