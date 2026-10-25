@@ -68,7 +68,7 @@ async function auth(request:any){
  const r=await pool.query(`insert into users(telegram_id,first_name,last_name,username,language_code,is_premium) values($1,$2,$3,$4,$5,$6) on conflict(telegram_id) do update set first_name=excluded.first_name,last_name=excluded.last_name,username=excluded.username,language_code=excluded.language_code,is_premium=excluded.is_premium,updated_at=now() returning id,telegram_id,first_name,last_name,username,language_code,is_premium,role`,[user.id,user.first_name,user.last_name??null,user.username??null,user.language_code??null,user.is_premium??false]);
  return r.rows[0];
 }
-app.get("/",async()=>({ok:true,service:"chipok-api",name:"ЧИПОК API",version:"0.3.2",health:"/health"}));
+app.get("/",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.3.2",health:"/health"}));
 app.get("/health",async()=>({ok:true,service:"chipok-api",version:"0.3.2"}));
 async function configureTelegramWebhook(){
  const token=process.env.TELEGRAM_BOT_TOKEN;
@@ -79,12 +79,12 @@ async function configureTelegramWebhook(){
  const r=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:webhookUrl,secret_token:secret,allowed_updates:["pre_checkout_query","message"],drop_pending_updates:false})});
  const data=await r.json() as {ok:boolean;description?:string};
  if(!data.ok)throw new Error(data.description||"Telegram setWebhook failed");
- const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть ЧИПОК"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь"},{command:"terms",description:"Условия покупки"},{command:"support",description:"Поддержка"}]})});
+ const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть Nookly"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь"},{command:"terms",description:"Условия покупки"},{command:"support",description:"Поддержка"}]})});
  const commandsData=await commands.json() as {ok:boolean;description?:string};
  if(!commandsData.ok)app.log.warn({description:commandsData.description},"Telegram commands registration failed");
  const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
  if(webAppUrl){
-   const menu=await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({menu_button:{type:"web_app",text:"🛍 ЧИПОК",web_app:{url:webAppUrl}}})});
+   const menu=await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({menu_button:{type:"web_app",text:"🛍 Nookly",web_app:{url:webAppUrl}}})});
    const menuData=await menu.json() as {ok:boolean;description?:string};
    if(!menuData.ok)app.log.warn({description:menuData.description},"Telegram menu button registration failed");
  }
@@ -209,12 +209,12 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
   const sellerOrder=(await c.query("select seller_id,seller_amount_minor,platform_fee_minor,currency from seller_orders where id=$1",[id])).rows[0];
   const existing=(await c.query("select 1 from ledger_entries where order_id=$1 and seller_id=$2 and type='sale' limit 1",[so.order_id,seller.id])).rowCount;
   if(!existing){
-    await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'sale',$3,$4,'Продажа через ЧИПОК'),($1,$2,'commission',-$5,$4,'Комиссия ЧИПОК')",
+    await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'sale',$3,$4,'Продажа через Nookly'),($1,$2,'commission',-$5,$4,'Комиссия Nookly')",
       [seller.id,so.order_id,Number(sellerOrder.seller_amount_minor)+Number(sellerOrder.platform_fee_minor),sellerOrder.currency,Number(sellerOrder.platform_fee_minor)]);
   }
   const completedOrder=(await c.query("select status,platform_fee_minor,currency from orders where id=$1",[so.order_id])).rows[0];
   if(completedOrder?.status==="completed"){
-    await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия ЧИПОК') on conflict (order_id,type) do nothing",
+    await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия Nookly') on conflict (order_id,type) do nothing",
       [so.order_id,Number(completedOrder.platform_fee_minor),completedOrder.currency]);
   }
   await c.query("update seller_profiles set completed_sales=completed_sales+1 where user_id=$1",[seller.id]);
@@ -341,7 +341,7 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
     const feeRows=await c.query("select amount_minor,currency from platform_ledger_entries where order_id=$1 and type='commission' limit 1",[d.order_id]);
     if(feeRows.rowCount){
       const exists=await c.query("select 1 from platform_ledger_entries where order_id=$1 and type='refund' limit 1",[d.order_id]);
-      if(!exists.rowCount)await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'refund',$2,$3,'Возврат комиссии ЧИПОК')",[d.order_id,-Number(feeRows.rows[0].amount_minor),feeRows.rows[0].currency]);
+      if(!exists.rowCount)await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'refund',$2,$3,'Возврат комиссии Nookly')",[d.order_id,-Number(feeRows.rows[0].amount_minor),feeRows.rows[0].currency]);
     }
     await c.query("update seller_orders set status='refunded' where order_id=$1 and status<>'completed'",[d.order_id]);
     await c.query("update orders set status='refunded',updated_at=now() where id=$1",[d.order_id]);
@@ -399,15 +399,15 @@ app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders(
  const result=await withTransaction(async(c)=>{
   const order=(await c.query("select id,total_minor,currency,status,buyer_id,expires_at from orders where id=$1 for update",[id])).rows[0];
   if(!order||order.buyer_id!==buyer.id)return {kind:"not_found" as const};
-  const titleRow=(await c.query("select coalesce(min(oi.title_snapshot),'Заказ ЧИПОК') as first_title from seller_orders so left join order_items oi on oi.seller_order_id=so.id where so.order_id=$1",[id])).rows[0];
-  order.first_title=titleRow?.first_title||"Заказ ЧИПОК";
+  const titleRow=(await c.query("select coalesce(min(oi.title_snapshot),'Заказ Nookly') as first_title from seller_orders so left join order_items oi on oi.seller_order_id=so.id where so.order_id=$1",[id])).rows[0];
+  order.first_title=titleRow?.first_title||"Заказ Nookly";
   if(order.status!=="created")return {kind:"not_payable" as const};
   if(order.expires_at&&new Date(order.expires_at).getTime()<=Date.now())return {kind:"expired" as const};
   const existing=(await c.query("select status,payload,invoice_link,amount_minor,currency,provider from payments where order_id=$1 for update",[id])).rows[0];
   if(existing?.status==="paid")return {kind:"paid" as const};
   if(existing?.status==="pending"&&existing.invoice_link&&existing.provider==="telegram"&&Number(existing.amount_minor)===Number(order.total_minor)&&existing.currency===order.currency)return {kind:"ready" as const,invoiceLink:existing.invoice_link};
   const payload="chipok:"+id+":"+randomUUID();
-  const invoiceLink=await createTelegramInvoiceLink({title:"ЧИПОК · "+String(order.first_title).slice(0,24),description:"Оплата заказа "+id,payload,amountMinor:Number(order.total_minor),currency:order.currency});
+  const invoiceLink=await createTelegramInvoiceLink({title:"Nookly · "+String(order.first_title).slice(0,24),description:"Оплата заказа "+id,payload,amountMinor:Number(order.total_minor),currency:order.currency});
   await c.query("insert into payments(order_id,provider,provider_payment_id,status,amount_minor,currency,payload,invoice_link) values($1,'telegram',null,'pending',$2,$3,$4,$5) on conflict(order_id) do update set provider='telegram',status='pending',amount_minor=excluded.amount_minor,currency=excluded.currency,payload=excluded.payload,invoice_link=excluded.invoice_link,updated_at=now()",[id,order.total_minor,order.currency,payload,invoiceLink]);
   return {kind:"ready" as const,invoiceLink};
  });
@@ -427,11 +427,11 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
   const command=String(update.message.text).trim().split(/\\s+/)[0].toLowerCase();
   if(command==="/start"||command==="/shop"){
    const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
-   await telegramSendMessage(update.message.chat.id,"ЧИПОК — маркетплейс внутри Telegram.\n\nОткрой каталог и выбирай товары.",webAppUrl?{inline_keyboard:[[{text:"🛍 Открыть ЧИПОК",web_app:{url:webAppUrl}}]]}:undefined);
+   await telegramSendMessage(update.message.chat.id,"Nookly — маркетплейс внутри Telegram.\n\nОткрой каталог и выбирай товары.",webAppUrl?{inline_keyboard:[[{text:"🛍 Открыть Nookly",web_app:{url:webAppUrl}}]]}:undefined);
   }
-  if(command==="/help")await telegramSendMessage(update.message.chat.id,"ЧИПОК — маркетплейс внутри Telegram.\n\n/shop — открыть каталог\n/terms — условия покупки\n/support — поддержка по заказам");
-  if(command==="/terms")await telegramSendMessage(update.message.chat.id,"Условия покупки ЧИПОК: покупка подтверждается после успешной оплаты; продавец подтверждает наличие; получение — встреча или самовывоз; спор и возврат рассматриваются через поддержку. Подробные правила доступны в приложении ЧИПОК.");
-  if(command==="/support")await telegramSendMessage(update.message.chat.id,"Поддержка ЧИПОК: откройте раздел «Заказы» в Mini App и создайте спор по нужному заказу. Для платежных вопросов укажите номер заказа и описание проблемы.");
+  if(command==="/help")await telegramSendMessage(update.message.chat.id,"Nookly — маркетплейс внутри Telegram.\n\n/shop — открыть каталог\n/terms — условия покупки\n/support — поддержка по заказам");
+  if(command==="/terms")await telegramSendMessage(update.message.chat.id,"Условия покупки Nookly: покупка подтверждается после успешной оплаты; продавец подтверждает наличие; получение — встреча или самовывоз; спор и возврат рассматриваются через поддержку. Подробные правила доступны в приложении Nookly.");
+  if(command==="/support")await telegramSendMessage(update.message.chat.id,"Поддержка Nookly: откройте раздел «Заказы» в Mini App и создайте спор по нужному заказу. Для платежных вопросов укажите номер заказа и описание проблемы.");
  }
  if(update.pre_checkout_query){
   const q=update.pre_checkout_query;const payment=(await pool.query(`select p.amount_minor,p.currency,o.status,o.expires_at from payments p join orders o on o.id=p.order_id where p.payload=$1`,[q.invoice_payload])).rows[0];
