@@ -365,7 +365,7 @@ app.post("/api/seller/products",async(req,reply)=>{
 });
 app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
- const order=(await pool.query(`select o.id,o.total_minor,o.currency,o.status,o.buyer_id,coalesce(min(oi.title_snapshot),'Заказ ЧИПОК') as first_title from orders o left join seller_orders so on so.order_id=o.id left join order_items oi on oi.seller_order_id=so.id where o.id=$1 group by o.id`,[id])).rows[0];
+ const order=(await pool.query(`select o.id,o.total_minor,o.currency,o.status,o.buyer_id,o.expires_at,coalesce(min(oi.title_snapshot),'Заказ ЧИПОК') as first_title from orders o left join seller_orders so on so.order_id=o.id left join order_items oi on oi.seller_order_id=so.id where o.id=$1 group by o.id`,[id])).rows[0];
  if(!order||order.buyer_id!==buyer.id)return reply.code(404).send({error:"Order not found"});
  if(order.status!=="created")return reply.code(409).send({error:"Order is not payable"}); if((order.expires_at && new Date(order.expires_at).getTime()<=Date.now())){await expireUnpaidOrders();return reply.code(409).send({error:"Order expired"});}
  const payload=`chipok:${id}:${randomUUID()}`; const invoiceLink=await createTelegramInvoiceLink({title:`ЧИПОК · ${String(order.first_title).slice(0,24)}`,description:`Оплата заказа ${id}`,payload,amountMinor:Number(order.total_minor),currency:order.currency});
@@ -383,7 +383,7 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
  if(update.message?.successful_payment){
   const sp=update.message.successful_payment;const payload=sp.invoice_payload;
   await withTransaction(async(c)=>{
-   const p=(await c.query(`select p.*,o.buyer_id,o.status as order_status from payments p join orders o on o.id=p.order_id where p.payload=$1 for update`,[payload])).rows[0];if(!p||p.order_status!=="created")return;
+   const p=(await c.query(`select p.*,o.buyer_id,o.status as order_status,o.expires_at from payments p join orders o on o.id=p.order_id where p.payload=$1 for update`,[payload])).rows[0];if(!p||p.order_status!=="created")return; if(p.expires_at && new Date(p.expires_at).getTime()<=Date.now()) return;
    const u=(await c.query("select id from users where telegram_id=$1",[update.message.from?.id])).rows[0];if(!u||u.id!==p.buyer_id)throw new Error("Payment buyer mismatch");
    if(Number(p.amount_minor)!==Number(sp.total_amount)||p.currency!==sp.currency)throw new Error("Payment amount mismatch");
    const eventId=String(sp.telegram_payment_charge_id||sp.provider_payment_charge_id||"");if(!eventId)throw new Error("Missing payment event id");
