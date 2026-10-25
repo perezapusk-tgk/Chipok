@@ -399,7 +399,6 @@ app.delete("/api/seller/products/:id",async(req,reply)=>{
  const result=await withTransaction(async(c)=>{
   const p=(await c.query("select id,status from products where id=$1 and seller_id=$2 for update",[id,seller.id])).rows[0];
   if(!p)return {kind:"not_found" as const};
-  const active=(await c.query("select count(*)::int as n from order_items oi join seller_orders so on so.id=oi.seller_order_id where oi.product_id=$1 and so.status in ('paid','seller_confirmed','ready_for_handover')",[id])).rows[0];
   await c.query("update products set status='archived',updated_at=now() where id=$1",[id]);
   return {kind:"archived" as const};
  });
