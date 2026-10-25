@@ -80,7 +80,8 @@ export default function Home(){
  async function loadSeller(){const r=await fetch(api()+"/api/seller/products",{headers:authHeaders()});if(r.ok)setSellerProducts((await r.json()).items||[])}
  const categoryNames=useMemo(()=>["Все",...categories.map((x:any)=>String(x.name)).filter(Boolean)], [categories]);
  const items=useMemo(()=>products.filter(p=>(cat==="Все"||p.category===cat||p.category_id===categories.find((x:any)=>x.name===cat)?.id)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[products,cat,q,categories]);
- const total=cart.reduce((s,p)=>s+Number(p.price_minor??Math.round((p.price||0)*100)),0);\n
+ const total=cart.reduce((s,p)=>s+Number(p.price_minor??Math.round((p.price||0)*100)),0);
+
  const add=(p:Product)=>setCart(c=>[...c,p]);
  if(!booted) return <div className="app"><main className="shell boot"><div className="boot-logo"><img src="/nookly-logo.svg" alt="Nookly" onError={e=>{e.currentTarget.style.display="none"}}/></div><h1>Nookly</h1><p>Загружаем маркетплейс…</p></main></div>;
  const loadFavorites=async()=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init)return;const r=await fetch(api()+"/api/favorites",{headers:{Authorization:"tma "+init}});if(r.ok){const d=await r.json();setFavoriteIds(new Set((d.items||d||[]).map((x:any)=>x.product_id||x.id)))}}; 
@@ -317,7 +318,7 @@ function SellerPanel({products,loadSeller,setMessage,back,categories}:{products:
  async function confirmOrder(id:string){const r=await fetch(api()+"/api/seller-orders/"+id+"/confirm",{method:"POST",headers:{Authorization:"tma "+init()}});if(!r.ok){setMessage((await r.json()).error||"Не удалось подтвердить заказ");return}await loadFinance();setMessage("Заказ подтверждён. Теперь отметьте его готовым к получению.");}
  async function rejectOrder(id:string){const r=await fetch(api()+"/api/seller-orders/"+id+"/reject",{method:"POST",headers:{Authorization:"tma "+init()}});if(!r.ok){setMessage((await r.json()).error||"Не удалось отменить заказ");return}await loadFinance();setMessage("Заказ отменён. Надёжность продавца пересчитана.");}
  async function readyOrder(id:string){const r=await fetch(api()+"/api/seller-orders/"+id+"/ready",{method:"POST",headers:{Authorization:"tma "+init()}});if(!r.ok){setMessage((await r.json()).error||"Не удалось отметить готовность");return}await loadFinance();setMessage("Заказ готов. Покупателю показан код получения.");}
- async function completeOrder(id:string){const code=window.prompt("Введите 6-значный код, который показал покупатель:")?.trim()||"";if(!/^\\d{6}$/.test(code))return;const r=await fetch(api()+"/api/seller-orders/"+id+"/complete",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init()},body:JSON.stringify({code})});if(!r.ok){setMessage((await r.json()).error||"Неверный код");return}await loadFinance();setMessage("Получение подтверждено. Средства доступны для вывода.");}
+ async function completeOrder(id:string){const code=window.prompt("Введите 6-значный код, который показал покупатель:")?.trim()||"";if(!/^\d{6}$/.test(code))return;const r=await fetch(api()+"/api/seller-orders/"+id+"/complete",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init()},body:JSON.stringify({code})});if(!r.ok){setMessage((await r.json()).error||"Неверный код");return}await loadFinance();setMessage("Получение подтверждено. Средства доступны для вывода.");}
  async function searchImages(){
   const query=(imageQuery||title).trim();if(query.length<2)return;
   setImageSearching(true);
