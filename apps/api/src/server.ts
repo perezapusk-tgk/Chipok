@@ -403,14 +403,8 @@ app.delete("/api/seller/products/:id",async(req,reply)=>{
   const p=(await c.query("select id,status from products where id=$1 and seller_id=$2 for update",[id,seller.id])).rows[0];
   if(!p)return {kind:"not_found" as const};
   const active=(await c.query("select count(*)::int as n from order_items oi join seller_orders so on so.id=oi.seller_order_id where oi.product_id=$1 and so.status in ('paid','seller_confirmed','ready_for_handover')",[id])).rows[0];
-  if(Number(active?.n||0)>0)return {kind:"active" as const};
-  const history=(await c.query("select count(*)::int as n from order_items where product_id=$1",[id])).rows[0];
-  if(Number(history?.n||0)>0){
-    await c.query("update products set status='archived',updated_at=now() where id=$1",[id]);
-    return {kind:"archived" as const};
-  }
-  await c.query("delete from products where id=$1",[id]);
-  return {kind:"deleted" as const};
+  await c.query("update products set status='archived',updated_at=now() where id=$1",[id]);
+  return {kind:"archived" as const};
  });
  if(result.kind==="not_found")return reply.code(404).send({error:"Товар не найден"});
  if(result.kind==="active")return reply.code(409).send({error:"Нельзя удалить товар с активным заказом"});
