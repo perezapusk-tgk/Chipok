@@ -8,7 +8,9 @@ import { answerPreCheckout, createTelegramInvoiceLink } from "./telegram-payment
 async function telegramSendMessage(chatId:number|string,text:string,replyMarkup?:Record<string,unknown>){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  if(!token)return;
- await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:chatId,text,disable_web_page_preview:true,...(replyMarkup?{reply_markup:replyMarkup}:{})}));
+ const body:Record<string,unknown>={chat_id:chatId,text,disable_web_page_preview:true};
+ if(replyMarkup)body.reply_markup=replyMarkup;
+ await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
 }
 
 import { runMigrations } from "./migrate.js";
