@@ -394,6 +394,21 @@ app.post("/api/seller/products",async(req,reply)=>{
  });
  return reply.code(201).send({product});
 });
+
+app.get("/api/seller/reliability",async(req,reply)=>{
+ const seller=await auth(req);
+ if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
+ const r=await pool.query("select reliability_score,completed_sales,rating from seller_profiles where user_id=$1",[seller.id]);
+ if(!r.rowCount)return reply.code(404).send({error:"Seller profile not found"});
+ const row=r.rows[0];const score=Number(row.reliability_score||0);
+ return {score,level:reliabilityLevel(score),completedSales:Number(row.completed_sales||0),rating:Number(row.rating||0)};
+});
+app.get("/api/seller/balance",async(req,reply)=>{
+ const seller=await auth(req);
+ if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
+ const r=await pool.query("select coalesce((select sum(amount_minor) from ledger_entries where seller_id=$1 and type in ('sale','adjustment','refund','payout')),0) as available_minor,coalesce((select sum(so.seller_amount_minor) from seller_orders so where so.seller_id=$1 and so.status in ('paid','seller_confirmed','ready_for_handover')),0) as pending_minor",[seller.id]);
+ return {availableMinor:Number(r.rows[0].available_minor||0),pendingMinor:Number(r.rows[0].pending_minor||0),currency:"RUB"};
+});
 app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const result=await withTransaction(async(c)=>{
