@@ -459,8 +459,8 @@ app.post("/api/seller-orders/:id/ready",async(req,reply)=>{
 });
 app.get("/api/orders/:id/handover",async(req,reply)=>{
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
- const rows=(await pool.query("select hc.seller_order_id,so.status,hc.created_at from handover_codes hc join seller_orders so on so.id=hc.seller_order_id join orders o on o.id=so.order_id where o.id=$1 and o.buyer_id=$2",[id,buyer.id])).rows;
- return {items:rows.map((x:any)=>({seller_order_id:x.seller_order_id,status:x.status,created_at:x.created_at,handoverCode:x.status==="ready_for_handover"?undefined:undefined}))};
+ const rows=(await pool.query("select hc.seller_order_id,so.status,hc.created_at,hc.code_encrypted from handover_codes hc join seller_orders so on so.id=hc.seller_order_id join orders o on o.id=so.order_id where o.id=$1 and o.buyer_id=$2",[id,buyer.id])).rows;
+ return {items:rows.map((x:any)=>({seller_order_id:x.seller_order_id,status:x.status,created_at:x.created_at,handoverCode:x.status==="ready_for_handover"&&x.code_encrypted?decryptHandover(x.code_encrypted):undefined}))};
 });
 app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
