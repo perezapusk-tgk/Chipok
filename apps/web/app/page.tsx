@@ -83,7 +83,17 @@ export default function Home(){
  const items=useMemo(()=>products.filter(p=>(cat==="Все"||p.category===cat||p.category_id===categories.find((x:any)=>x.name===cat)?.id)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[products,cat,q,categories]);
  const total=cart.reduce((s,p)=>s+Number(p.price_minor??Math.round((p.price||0)*100)),0);
 
- const add=(p:Product)=>setCart(c=>[...c,p]);
+ const add=(p:Product)=>{
+   const stock=Number(p.available_stock??0);
+   setCart(c=>{
+     const count=c.filter(x=>x.id===p.id).length;
+     if(stock<=count){
+       setMessage("Больше этого товара добавить нельзя: достигнут доступный остаток.");
+       return c;
+     }
+     return [...c,p];
+   });
+ };
  if(!booted) return <div className="app"><main className="shell boot"><div className="boot-logo"><img src={logo()} alt="Nookly" onError={e=>{e.currentTarget.style.display="none"}}/></div><h1>Nookly</h1><p>Загружаем маркетплейс…</p></main></div>;
  const loadFavorites=async()=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init)return;const r=await fetch(api()+"/api/favorites",{headers:{Authorization:"tma "+init}});if(r.ok){const d=await r.json();setFavoriteIds(new Set((d.items||d||[]).map((x:any)=>x.product_id||x.id)))}}; 
  const toggleFavorite=async(p:Product)=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init){setMessage("Открой Nookly внутри Telegram.");return}const isFav=favoriteIds.has(p.id);const r=await fetch(api()+"/api/favorites/"+p.id,{method:isFav?"DELETE":"POST",headers:{Authorization:"tma "+init}});if(!r.ok){setMessage("Не удалось изменить избранное");return}setFavoriteIds(prev=>{const n=new Set(prev);if(isFav)n.delete(p.id);else n.add(p.id);return n});setMessage(isFav?"Удалено из избранного":"Товар добавлен в избранное.");};
