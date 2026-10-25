@@ -60,8 +60,8 @@ export default function Home(){
        setProducts(process.env.NODE_ENV==="production"?[]:fallback);
      }
    }catch{
-     setProducts(fallback);
-     setMessage("Каталог временно не ответил. Показываем доступные товары — повтори обновление позже.");
+     setProducts(process.env.NODE_ENV==="production"?[]:fallback);
+     setMessage("Каталог временно не ответил. Обнови Nookly через несколько секунд.");
    }
    try{
      const me=await fetch(api()+"/api/me",{headers:authHeaders(),cache:"no-store"}); if(me.ok){const d=await me.json();setUser(d.user)}
