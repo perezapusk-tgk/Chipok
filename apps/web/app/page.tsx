@@ -204,8 +204,9 @@ function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}) {
    {localMessage&&<p className="small">{localMessage}</p>}
    <button className="icon-btn" onClick={()=>setActive(null)}>←</button>
    <h1>Заказ #{active.id.slice(0,8)}</h1>
-   <div className="order-status">{statusRu(active.status)}</div>
+   <div className={"order-status status-"+active.status}>{statusRu(active.status)}</div>
    <div className="order-total">{money(Number(active.total_minor),active.currency)}</div>
+   <div className="order-progress"><span className={["paid","seller_confirmed","ready_for_handover","completed"].includes(active.status)?"done":""}>Оплата</span><span className={["seller_confirmed","ready_for_handover","completed"].includes(active.status)?"done":""}>Подтверждение</span><span className={["ready_for_handover","completed"].includes(active.status)?"done":""}>Получение</span><span className={active.status==="completed"?"done":""}>Завершено</span></div>
    <div className="small">{new Date(active.created_at).toLocaleString("ru-RU")}</div>
 
    <div className="menu order-sellers">
