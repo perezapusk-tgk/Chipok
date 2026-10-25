@@ -29,7 +29,7 @@ const fallback:Product[]=[
 ];
 const cats=["Все","Еда","Одежда","Электроника","Дом"];
 const money=(minor:number,currency="RUB")=>new Intl.NumberFormat("ru-RU",{style:"currency",currency,maximumFractionDigits:0}).format(minor/100);
-const api=()=>process.env.NEXT_PUBLIC_API_URL||"http://localhost:3001";
+const api=()=>process.env.NEXT_PUBLIC_API_URL||(process.env.NODE_ENV==="production"?"https://chipok-api.onrender.com":"http://localhost:3001");
 
 export default function Home(){
  const [tab,setTab]=useState("home"),[cat,setCat]=useState("Все"),[q,setQ]=useState("");
@@ -48,22 +48,36 @@ export default function Home(){
    return()=>{alive=false};
  },[]);
  async function load(){
+   let catalogLoaded=false;
    try{
-     const r=await fetch(api()+"/api/catalog"); if(r.ok){const d=await r.json(); setProducts((d.items||[]).map((p:any)=>({...p,price:p.price_minor/100,image:p.image_url})))} else if(process.env.NODE_ENV!=="production"){setProducts(fallback)}
-     const me=await fetch(api()+"/api/me",{headers:authHeaders()}); if(me.ok){const d=await me.json();setUser(d.user)}
-     const cr=await fetch(api()+"/api/categories"); if(cr.ok){const d=await cr.json();setCategories(d.items||[])}
-     await loadFavorites();
-     await loadNotifications();
+     const r=await fetch(api()+"/api/catalog?limit=50",{cache:"no-store"});
+     if(r.ok){
+       const d=await r.json();
+       const apiItems=(d.items||[]).map((p:any)=>({...p,price:p.price_minor/100,image:p.image_url}));
+       setProducts(apiItems.length?apiItems:fallback);
+       catalogLoaded=true;
+     }else{
+       setProducts(fallback);
+     }
    }catch{
-     if(process.env.NODE_ENV==="production")setProducts([]);
-     setMessage("Не удалось загрузить данные. Каталог можно открыть после повторной попытки.");
+     setProducts(fallback);
+     setMessage("Каталог временно не ответил. Показываем доступные товары — повтори обновление позже.");
    }
+   try{
+     const me=await fetch(api()+"/api/me",{headers:authHeaders(),cache:"no-store"}); if(me.ok){const d=await me.json();setUser(d.user)}
+   }catch{}
+   try{
+     const cr=await fetch(api()+"/api/categories",{cache:"no-store"}); if(cr.ok){const d=await cr.json();setCategories(d.items||[])}
+   }catch{}
+   try{await loadFavorites()}catch{}
+   try{await loadNotifications()}catch{}
+   if(!catalogLoaded && process.env.NODE_ENV==="production") setMessage("Каталог API временно недоступен. Проверь соединение и обнови ЧИПОК.");
  }
  async function loadOrders(){const r=await fetch(api()+"/api/orders",{headers:authHeaders()});if(r.ok)setOrders((await r.json()).items||[])}
  async function loadNotifications(){const r=await fetch(api()+"/api/notifications",{headers:authHeaders()});if(r.ok)setNotifications((await r.json()).items||[])}
  async function readNotification(id:string){const r=await fetch(api()+"/api/notifications/"+id+"/read",{method:"POST",headers:authHeaders()});if(r.ok)setNotifications(prev=>prev.map(n=>n.id===id?{...n,read_at:new Date().toISOString()}:n))}
  async function loadSeller(){const r=await fetch(api()+"/api/seller/products",{headers:authHeaders()});if(r.ok)setSellerProducts((await r.json()).items||[])}
- const items=useMemo(()=>products.filter(p=>(cat==="Все"||p.category===cat)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[products,cat,q]);
+ const items=useMemo(()=>products.filter(p=>(cat==="Все"||p.category===cat||p.category_id===categories.find((x:any)=>x.name===cat)?.id)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[products,cat,q,categories]);
  const total=cart.reduce((s,p)=>s+(p.price_minor??Math.round((p.price||0)*100)),0);
  const add=(p:Product)=>setCart(c=>[...c,p]);
  if(!booted) return <div className="app"><main className="shell boot"><div className="boot-logo"><img src="/chipok-logo.svg" alt="ЧИПОК" onError={e=>{e.currentTarget.style.display="none"}}/></div><h1>ЧИПОК</h1><p>Загружаем маркетплейс…</p></main></div>;
