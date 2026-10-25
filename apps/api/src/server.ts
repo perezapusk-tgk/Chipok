@@ -374,7 +374,47 @@ app.get("/api/seller/orders",async(req)=>{
  const seller=await auth(req);const r=await pool.query("select so.id,so.order_id,so.status,so.subtotal_minor,so.platform_fee_minor,so.seller_amount_minor,so.fulfillment_type,o.created_at,o.buyer_id from seller_orders so join orders o on o.id=so.order_id where so.seller_id=$1 order by o.created_at desc",[seller.id]);return {items:r.rows};
 });
 app.get("/api/seller/products",async(req)=>{
- const seller=await auth(req);const r=await pool.query("select p.id,p.title,p.price_minor,p.currency,p.status,p.fulfillment_type,p.created_at,i.stock,i.reserved from products p join inventory i on i.product_id=p.id where p.seller_id=$1 order by p.created_at desc",[seller.id]);return {items:r.rows};
+ const seller=await auth(req);
+ const r=await pool.query("select p.id,p.title,p.description,p.price_minor,p.currency,p.status,p.fulfillment_type,p.category_id,p.created_at,i.stock,i.reserved,pi.url as image_url from products p join inventory i on i.product_id=p.id left join lateral(select url from product_images where product_id=p.id order by sort_order,id limit 1) pi on true where p.seller_id=$1 order by p.created_at desc",[seller.id]);
+ return {items:r.rows};
+});
+app.patch("/api/seller/products/:id",async(req,reply)=>{
+ const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
+ const id=z.string().uuid().parse((req.params as any).id);
+ const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().refine(v=>v.startsWith("data:image/")||v.startsWith("https://")||v.startsWith("http://"),"Invalid image URL").optional()}).parse(req.body);
+ const updated=await withTransaction(async(c)=>{
+  const p=(await c.query("select id,status from products where id=$1 and seller_id=$2 for update",[id,seller.id])).rows[0];
+  if(!p)return {kind:"not_found" as const};
+  const active=(await c.query("select count(*)::int as n from order_items oi join seller_orders so on so.id=oi.seller_order_id where oi.product_id=$1 and so.status in ('paid','seller_confirmed','ready_for_handover')",[id])).rows[0];
+  if(Number(active?.n||0)>0 && body.stock<0)return {kind:"active" as const};
+  await c.query("update products set title=$1,description=$2,price_minor=$3,category_id=$4,fulfillment_type=$5,status='published',updated_at=now() where id=$6",[body.title,body.description||null,body.priceMinor,body.categoryId||null,body.fulfillmentType,id]);
+  await c.query("update inventory set stock=$1,updated_at=now() where product_id=$2",[body.stock,id]);
+  if(body.imageUrl){await c.query("delete from product_images where product_id=$1",[id]);await c.query("insert into product_images(product_id,url,sort_order) values($1,$2,0)",[id,body.imageUrl]);}
+  return {kind:"ok" as const};
+ });
+ if(updated.kind==="not_found")return reply.code(404).send({error:"Товар не найден"});
+ if(updated.kind==="active")return reply.code(409).send({error:"Нельзя изменить этот товар сейчас"});
+ return {ok:true};
+});
+app.delete("/api/seller/products/:id",async(req,reply)=>{
+ const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
+ const id=z.string().uuid().parse((req.params as any).id);
+ const result=await withTransaction(async(c)=>{
+  const p=(await c.query("select id,status from products where id=$1 and seller_id=$2 for update",[id,seller.id])).rows[0];
+  if(!p)return {kind:"not_found" as const};
+  const active=(await c.query("select count(*)::int as n from order_items oi join seller_orders so on so.id=oi.seller_order_id where oi.product_id=$1 and so.status in ('paid','seller_confirmed','ready_for_handover')",[id])).rows[0];
+  if(Number(active?.n||0)>0)return {kind:"active" as const};
+  const history=(await c.query("select count(*)::int as n from order_items where product_id=$1",[id])).rows[0];
+  if(Number(history?.n||0)>0){
+    await c.query("update products set status='archived',updated_at=now() where id=$1",[id]);
+    return {kind:"archived" as const};
+  }
+  await c.query("delete from products where id=$1",[id]);
+  return {kind:"deleted" as const};
+ });
+ if(result.kind==="not_found")return reply.code(404).send({error:"Товар не найден"});
+ if(result.kind==="active")return reply.code(409).send({error:"Нельзя удалить товар с активным заказом"});
+ return {ok:true,mode:result.kind};
 });
 app.get("/api/images/search",async(req,reply)=>{
  const q=z.object({q:z.string().trim().min(2).max(120),limit:z.coerce.number().int().min(1).max(12).default(8)}).parse(req.query);
