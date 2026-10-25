@@ -29,8 +29,8 @@ app.addHook("onSend",async(_req,reply)=>{
  reply.header("Permissions-Policy","camera=(),microphone=(),geolocation=()");
  reply.header("Cross-Origin-Resource-Policy","same-site");
 });
-const allowedOrigins=(process.env.CORS_ALLOWED_ORIGINS||process.env.TELEGRAM_WEBAPP_URL||"").split(",").map(x=>x.trim()).filter(Boolean);
-await app.register(cors,{origin:(origin,cb)=>{if(!origin||allowedOrigins.length===0||allowedOrigins.includes(origin))return cb(null,true);return cb(new Error("Origin not allowed"),false)}});
+const allowedOrigins=(process.env.CORS_ALLOWED_ORIGINS||process.env.TELEGRAM_WEBAPP_URL||"").split(",").map(x=>x.trim()).filter(Boolean);\nconst builtInOrigins=["https://perezapusk-tgk.github.io"];
+await app.register(cors,{origin:(origin,cb)=>{if(!origin||allowedOrigins.length===0||allowedOrigins.includes(origin)||builtInOrigins.includes(origin))return cb(null,true);return cb(new Error("Origin not allowed"),false)}});
 function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missing ${key}`);return v}
 const rateBuckets=new Map<string,{count:number;reset:number}>();
 function rateLimit(key:string,limit=60,windowMs=60_000){const now=Date.now();const cur=rateBuckets.get(key);if(!cur||cur.reset<=now){rateBuckets.set(key,{count:1,reset:now+windowMs});return true}if(cur.count>=limit)return false;cur.count++;return true}
