@@ -248,7 +248,7 @@ app.post("/api/seller/payouts",async(req,reply)=>{
   await c.query("select id from users where id=$1 for update",[seller.id]);
   const currency=body.currency.toUpperCase();
   if(currency!=="RUB")throw Object.assign(new Error("Only RUB payouts are supported"),{statusCode:400});
-  const available=await c.query("select coalesce(sum(case when type in ('sale','commission','payout','adjustment') then amount_minor else 0 end),0)::bigint as n from ledger_entries where seller_id=$1 and currency=$2",[seller.id,currency]);
+  const available=await c.query("select coalesce(sum(case when type in ('sale','payout','adjustment') then amount_minor else 0 end),0)::bigint as n from ledger_entries where seller_id=$1 and currency=$2",[seller.id,currency]);
   const amount=Number(available.rows[0].n);
   if(body.amountMinor>amount)throw Object.assign(new Error("Insufficient available balance"),{statusCode:409});
   const p=(await c.query("insert into payouts(seller_id,amount_minor,currency,status) values($1,$2,$3,'pending') returning *",[seller.id,body.amountMinor,currency])).rows[0];
