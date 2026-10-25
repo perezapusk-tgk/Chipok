@@ -53,7 +53,7 @@ export default function Home(){
      const r=await fetch(api()+"/api/catalog?limit=50",{cache:"no-store"});
      if(r.ok){
        const d=await r.json();
-       const apiItems=(d.items||[]).map((p:any)=>({...p,price:p.price_minor/100,image:p.image_url}));
+       const apiItems=(d.items||[]).map((p:any)=>({...p,price_minor:Number(p.price_minor),price:Number(p.price_minor)/100,image:p.image_url}));
        setProducts(apiItems.length?apiItems:fallback);
        catalogLoaded=true;
      }else{
@@ -78,7 +78,7 @@ export default function Home(){
  async function readNotification(id:string){const r=await fetch(api()+"/api/notifications/"+id+"/read",{method:"POST",headers:authHeaders()});if(r.ok)setNotifications(prev=>prev.map(n=>n.id===id?{...n,read_at:new Date().toISOString()}:n))}
  async function loadSeller(){const r=await fetch(api()+"/api/seller/products",{headers:authHeaders()});if(r.ok)setSellerProducts((await r.json()).items||[])}
  const items=useMemo(()=>products.filter(p=>(cat==="Все"||p.category===cat||p.category_id===categories.find((x:any)=>x.name===cat)?.id)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[products,cat,q,categories]);
- const total=cart.reduce((s,p)=>s+(p.price_minor??Math.round((p.price||0)*100)),0);
+ const total=cart.reduce((s,p)=>s+Number(p.price_minor??Math.round((p.price||0)*100)),0);
  const add=(p:Product)=>setCart(c=>[...c,p]);
  if(!booted) return <div className="app"><main className="shell boot"><div className="boot-logo"><img src="/chipok-logo.svg" alt="ЧИПОК" onError={e=>{e.currentTarget.style.display="none"}}/></div><h1>ЧИПОК</h1><p>Загружаем маркетплейс…</p></main></div>;
  const loadFavorites=async()=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init)return;const r=await fetch(api()+"/api/favorites",{headers:{Authorization:"tma "+init}});if(r.ok){const d=await r.json();setFavoriteIds(new Set((d.items||d||[]).map((x:any)=>x.product_id||x.id)))}}; 
