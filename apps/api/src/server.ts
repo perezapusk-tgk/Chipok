@@ -367,9 +367,13 @@ app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders(
  const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const order=(await pool.query(`select o.id,o.total_minor,o.currency,o.status,o.buyer_id,o.expires_at,coalesce(min(oi.title_snapshot),'Заказ ЧИПОК') as first_title from orders o left join seller_orders so on so.order_id=o.id left join order_items oi on oi.seller_order_id=so.id where o.id=$1 group by o.id`,[id])).rows[0];
  if(!order||order.buyer_id!==buyer.id)return reply.code(404).send({error:"Order not found"});
- if(order.status!=="created")return reply.code(409).send({error:"Order is not payable"}); if((order.expires_at && new Date(order.expires_at).getTime()<=Date.now())){await expireUnpaidOrders();return reply.code(409).send({error:"Order expired"});}
+ if(order.status!=="created")return reply.code(409).send({error:"Order is not payable"});
+ if(order.expires_at && new Date(order.expires_at).getTime()<=Date.now()){await expireUnpaidOrders();return reply.code(409).send({error:"Order expired"});}
+ const existing=(await pool.query("select status,payload,invoice_link,amount_minor,currency from payments where order_id=$1",[id])).rows[0];
+ if(existing?.status==="paid")return reply.code(409).send({error:"Order is already paid"});
+ if(existing?.status==="pending"&&existing.invoice_link&&existing.payload&&Number(existing.amount_minor)===Number(order.total_minor)&&existing.currency===order.currency)return {invoiceLink:existing.invoice_link};
  const payload=`chipok:${id}:${randomUUID()}`; const invoiceLink=await createTelegramInvoiceLink({title:`ЧИПОК · ${String(order.first_title).slice(0,24)}`,description:`Оплата заказа ${id}`,payload,amountMinor:Number(order.total_minor),currency:order.currency});
- await pool.query(`insert into payments(order_id,provider,provider_payment_id,status,amount_minor,currency,payload) values($1,'telegram',null,'pending',$2,$3,$4) on conflict(order_id) do update set provider='telegram',status='pending',amount_minor=excluded.amount_minor,currency=excluded.currency,payload=excluded.payload,updated_at=now()`,[id,order.total_minor,order.currency,payload]);
+ await pool.query(`insert into payments(order_id,provider,provider_payment_id,status,amount_minor,currency,payload,invoice_link) values($1,'telegram',null,'pending',$2,$3,$4,$5) on conflict(order_id) do update set provider='telegram',status='pending',amount_minor=excluded.amount_minor,currency=excluded.currency,payload=excluded.payload,invoice_link=excluded.invoice_link,updated_at=now()`,[id,order.total_minor,order.currency,payload,invoiceLink]);
  return {invoiceLink};
 });
 app.post("/api/payments/telegram/webhook",async(req,reply)=>{
