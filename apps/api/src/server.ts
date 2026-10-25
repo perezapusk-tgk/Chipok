@@ -385,7 +385,6 @@ app.patch("/api/seller/products/:id",async(req,reply)=>{
  const updated=await withTransaction(async(c)=>{
   const p=(await c.query("select id,status from products where id=$1 and seller_id=$2 for update",[id,seller.id])).rows[0];
   if(!p)return {kind:"not_found" as const};
-  const active=(await c.query("select count(*)::int as n from order_items oi join seller_orders so on so.id=oi.seller_order_id where oi.product_id=$1 and so.status in ('paid','seller_confirmed','ready_for_handover')",[id])).rows[0];
   if(Number(active?.n||0)>0 && body.stock<0)return {kind:"active" as const};
   await c.query("update products set title=$1,description=$2,price_minor=$3,category_id=$4,fulfillment_type=$5,status='published',updated_at=now() where id=$6",[body.title,body.description||null,body.priceMinor,body.categoryId||null,body.fulfillmentType,id]);
   await c.query("update inventory set stock=$1,updated_at=now() where product_id=$2",[body.stock,id]);
@@ -407,7 +406,6 @@ app.delete("/api/seller/products/:id",async(req,reply)=>{
   return {kind:"archived" as const};
  });
  if(result.kind==="not_found")return reply.code(404).send({error:"Товар не найден"});
- if(result.kind==="active")return reply.code(409).send({error:"Нельзя удалить товар с активным заказом"});
  return {ok:true,mode:result.kind};
 });
 app.get("/api/images/search",async(req,reply)=>{
