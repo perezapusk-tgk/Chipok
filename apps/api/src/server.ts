@@ -211,12 +211,9 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
   await c.query("update seller_orders set status='completed' where id=$1",[id]);
   await c.query("update orders set status=case when not exists(select 1 from seller_orders where order_id=$1 and status<>'completed') then 'completed' when exists(select 1 from seller_orders where order_id=$1 and status='paid') then 'paid' when exists(select 1 from seller_orders where order_id=$1 and status='seller_confirmed') then 'seller_confirmed' when not exists(select 1 from seller_orders where order_id=$1 and status not in ('ready_for_handover','completed')) then 'ready_for_handover' else status end,updated_at=now() where id=$1",[so.order_id]);
   await c.query("update inventory i set reserved=reserved-oi.quantity,stock=stock-oi.quantity,updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[id]);
-  const sellerOrder=(await c.query("select seller_id,seller_amount_minor,platform_fee_minor,currency from seller_orders where id=$1",[id])).rows[0];
-  const existing=(await c.query("select 1 from ledger_entries where order_id=$1 and seller_id=$2 and type='sale' limit 1",[so.order_id,seller.id])).rowCount;
-  if(!existing){
-    await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'sale',$3,$4,'Продажа через Nookly'),($1,$2,'commission',-$5,$4,'Комиссия Nookly')",
-      [seller.id,so.order_id,Number(sellerOrder.seller_amount_minor)+Number(sellerOrder.platform_fee_minor),sellerOrder.currency,Number(sellerOrder.platform_fee_minor)]);
-  }
+  const sellerOrder=(await c.query("select seller_id,seller_amount_minor,currency from seller_orders where id=$1",[id])).rows[0];
+  await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'sale',$3,$4,'Продажа через Nookly') on conflict (order_id,seller_id,type) where order_id is not null do nothing",
+    [seller.id,so.order_id,Number(sellerOrder.seller_amount_minor),sellerOrder.currency]);
   const completedOrder=(await c.query("select status,platform_fee_minor,currency from orders where id=$1",[so.order_id])).rows[0];
   if(completedOrder?.status==="completed"){
     await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия Nookly') on conflict (order_id,type) do nothing",
@@ -233,7 +230,7 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
 app.get("/api/seller/reliability",async(req)=>{const seller=await auth(req);const r=await pool.query("select reliability_score,completed_sales from seller_profiles where user_id=$1",[seller.id]);if(!r.rowCount)return {score:0,level:"blocked",completedSales:0};const score=Number(r.rows[0].reliability_score);return {score,level:reliabilityLevel(score),completedSales:Number(r.rows[0].completed_sales)};});
 app.get("/api/seller/balance",async(req)=>{
  const seller=await auth(req);
- const r=await pool.query("select coalesce(sum(case when type in ('sale','commission','payout','adjustment') then amount_minor else 0 end),0)::bigint as available from ledger_entries where seller_id=$1",[seller.id]);
+ const r=await pool.query("select coalesce(sum(case when type in ('sale','payout','adjustment') then amount_minor else 0 end),0)::bigint as available from ledger_entries where seller_id=$1",[seller.id]);
  const pending=await pool.query("select coalesce(sum(so.seller_amount_minor),0)::bigint as pending from seller_orders so join orders o on o.id=so.order_id where so.seller_id=$1 and so.status in ('paid','seller_confirmed','ready_for_handover')",[seller.id]);
  const x=r.rows[0];return {currency:"RUB",availableMinor:Number(x.available),pendingMinor:Number(pending.rows[0].pending),totalEarnedMinor:Number(x.available)+Number(pending.rows[0].pending)};
 });
