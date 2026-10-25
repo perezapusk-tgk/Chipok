@@ -5,6 +5,12 @@ import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv } f
 import { pool, withTransaction } from "./db.js";
 import { validateTelegramInitData } from "./telegram.js";
 import { answerPreCheckout, createTelegramInvoiceLink } from "./telegram-payments.js";
+async function telegramSendMessage(chatId:number|string,text:string){
+ const token=process.env.TELEGRAM_BOT_TOKEN;
+ if(!token)return;
+ await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:chatId,text,disable_web_page_preview:true})});
+}
+
 import { runMigrations } from "./migrate.js";
 const app=Fastify({logger:true});
 app.addHook("onSend",async(_req,reply)=>{
@@ -394,6 +400,12 @@ app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders(
 app.post("/api/payments/telegram/webhook",async(req,reply)=>{
  const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;if(!secret)return reply.code(503).send({error:"Payment webhook secret is not configured"});if(req.headers["x-telegram-bot-api-secret-token"]!==secret)return reply.code(401).send({error:"Unauthorized"});
  const update:any=req.body;
+ if(update.message?.text && update.message?.from?.id){
+  const command=String(update.message.text).trim().split(/\\s+/)[0].toLowerCase();
+  if(command==="/start"||command==="/help")await telegramSendMessage(update.message.chat.id,"ЧИПОК — маркетплейс внутри Telegram.\n\n/shop — открыть каталог\n/terms — условия покупки\n/support — поддержка по заказам");
+  if(command==="/terms")await telegramSendMessage(update.message.chat.id,"Условия покупки ЧИПОК: покупка подтверждается после успешной оплаты; продавец подтверждает наличие; получение — встреча или самовывоз; спор и возврат рассматриваются через поддержку. Подробные правила доступны в приложении ЧИПОК.");
+  if(command==="/support")await telegramSendMessage(update.message.chat.id,"Поддержка ЧИПОК: откройте раздел «Заказы» в Mini App и создайте спор по нужному заказу. Для платежных вопросов укажите номер заказа и описание проблемы.");
+ }
  if(update.pre_checkout_query){
   const q=update.pre_checkout_query;const payment=(await pool.query(`select p.amount_minor,p.currency,o.status,o.expires_at from payments p join orders o on o.id=p.order_id where p.payload=$1`,[q.invoice_payload])).rows[0];
   const ok=!!payment&&(payment.status==="pending"||payment.status==="created")&&payment.status!=="expired"&&(!payment.expires_at||new Date(payment.expires_at).getTime()>Date.now())&&Number(payment.amount_minor)===Number(q.total_amount)&&payment.currency===q.currency;
