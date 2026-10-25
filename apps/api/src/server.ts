@@ -211,9 +211,10 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
   await c.query("update seller_orders set status='completed' where id=$1",[id]);
   await c.query("update orders set status=case when not exists(select 1 from seller_orders where order_id=$1 and status<>'completed') then 'completed' when exists(select 1 from seller_orders where order_id=$1 and status='paid') then 'paid' when exists(select 1 from seller_orders where order_id=$1 and status='seller_confirmed') then 'seller_confirmed' when not exists(select 1 from seller_orders where order_id=$1 and status not in ('ready_for_handover','completed')) then 'ready_for_handover' else status end,updated_at=now() where id=$1",[so.order_id]);
   await c.query("update inventory i set reserved=reserved-oi.quantity,stock=stock-oi.quantity,updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[id]);
-  const sellerOrder=(await c.query("select seller_id,seller_amount_minor,currency from seller_orders where id=$1",[id])).rows[0];
+  const sellerOrder=(await c.query("select seller_id,seller_amount_minor from seller_orders where id=$1",[id])).rows[0];
+  const orderCurrency=(await c.query("select currency from orders where id=$1",[so.order_id])).rows[0]?.currency||"RUB";
   await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'sale',$3,$4,'Продажа через Nookly') on conflict (order_id,seller_id,type) where order_id is not null do nothing",
-    [seller.id,so.order_id,Number(sellerOrder.seller_amount_minor),sellerOrder.currency]);
+    [seller.id,so.order_id,Number(sellerOrder.seller_amount_minor),orderCurrency]);
   const completedOrder=(await c.query("select status,platform_fee_minor,currency from orders where id=$1",[so.order_id])).rows[0];
   if(completedOrder?.status==="completed"){
     await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия Nookly') on conflict (order_id,type) do nothing",
