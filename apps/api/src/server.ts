@@ -99,7 +99,7 @@ app.get("/api/catalog",async(req)=>{
  const values:any[]=[];const where:string[]=[`p.status='published'`];
  if(q.search){values.push(`%${q.search}%`);where.push(`(p.title ilike $${values.length} or coalesce(p.description,'') ilike $${values.length})`)}
  if(q.categoryId){values.push(q.categoryId);where.push(`p.category_id=$${values.length}`)} values.push(q.limit,q.offset);
- const r=await pool.query(`select p.id,p.title,p.price_minor,p.currency,p.seller_id,p.category_id,i.stock-i.reserved as available_stock,pi.url as image_url from products p join inventory i on i.product_id=p.id left join lateral(select url from product_images where product_id=p.id order by sort_order,id limit 1) pi on true where ${where.join(" and ")} and i.stock-i.reserved>0 order by p.created_at desc limit $${values.length-1} offset $${values.length}`,values);
+ const r=await pool.query(`select p.id,p.title,p.price_minor,p.currency,p.seller_id,p.category_id,p.fulfillment_type,i.stock-i.reserved as available_stock,pi.url as image_url from products p join inventory i on i.product_id=p.id left join lateral(select url from product_images where product_id=p.id order by sort_order,id limit 1) pi on true where ${where.join(" and ")} and i.stock-i.reserved>0 order by p.created_at desc limit $${values.length-1} offset $${values.length}`,values);
  return {items:r.rows,nextCursor:r.rows.length===q.limit?q.offset+q.limit:null};
 });
 app.get("/api/products/:id",async(req,reply)=>{
