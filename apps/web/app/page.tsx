@@ -54,7 +54,7 @@ export default function Home(){
      const r=await fetch(api()+"/api/catalog?limit=50",{cache:"no-store"});
      if(r.ok){
        const d=await r.json();
-       const apiItems=(d.items||[]).map((p:any)=>({...p,price_minor:Number(p.price_minor),price:Number(p.price_minor)/100,image:p.image_url}));
+       const apiItems=(d.items||[]).map((p:any)=>({...p,price_minor:Number(p.price_minor),price:Number(p.price_minor)/100,image:p.image_url,seller:p.store_name||p.seller_first_name||(p.seller_username?"@"+p.seller_username:"Продавец Nookly")}));
        setProducts(apiItems);
        catalogLoaded=true;
      }else{
