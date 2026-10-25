@@ -5,7 +5,7 @@ async function telegramCall<T>(method:string,body:Record<string,unknown>):Promis
   if(!token) throw new Error("Missing TELEGRAM_BOT_TOKEN");
   const r=await fetch("https://api.telegram.org/bot"+token+"/"+method,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
   const data=await r.json() as {ok:boolean;result?:T;description?:string};
-  if(!data.ok||!data.result) throw new Error(data.description||"Telegram Bot API error");
+  if(!data.ok||!data.result){ const error=Object.assign(new Error(data.description||"Telegram Bot API error"),{statusCode:502}); throw error; }
   return data.result;
 }
 
