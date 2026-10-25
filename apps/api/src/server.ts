@@ -68,8 +68,8 @@ async function auth(request:any){
  const r=await pool.query(`insert into users(telegram_id,first_name,last_name,username,language_code,is_premium) values($1,$2,$3,$4,$5,$6) on conflict(telegram_id) do update set first_name=excluded.first_name,last_name=excluded.last_name,username=excluded.username,language_code=excluded.language_code,is_premium=excluded.is_premium,updated_at=now() returning id,telegram_id,first_name,last_name,username,language_code,is_premium,role`,[user.id,user.first_name,user.last_name??null,user.username??null,user.language_code??null,user.is_premium??false]);
  return r.rows[0];
 }
-app.get("/",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.3.2",health:"/health"}));
-app.get("/health",async()=>({ok:true,service:"chipok-api",version:"0.3.2"}));
+app.get("/",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.3.3",health:"/health"}));
+app.get("/health",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.3.3"}));
 async function configureTelegramWebhook(){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;
@@ -381,10 +381,11 @@ app.get("/api/seller/products",async(req)=>{
 app.patch("/api/seller/products/:id",async(req,reply)=>{
  const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
  const id=z.string().uuid().parse((req.params as any).id);
- const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().refine(v=>v.startsWith("data:image/")||v.startsWith("https://")||v.startsWith("http://"),"Invalid image URL").optional()}).parse(req.body);
+ const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().refine(v=>v.startsWith("data:image/")||v.startsWith("https://"),"Invalid image URL").optional()}).parse(req.body);
  const updated=await withTransaction(async(c)=>{
-  const p=(await c.query("select id,status from products where id=$1 and seller_id=$2 for update",[id,seller.id])).rows[0];
+  const p=(await c.query("select id,status,coalesce((select reserved from inventory where product_id=products.id),0) as reserved from products where id=$1 and seller_id=$2 for update",[id,seller.id])).rows[0];
   if(!p)return {kind:"not_found" as const};
+  if(body.stock<Number(p.reserved))throw Object.assign(new Error(`Нельзя установить остаток ниже зарезервированного количества (${p.reserved})`),{statusCode:409});
   await c.query("update products set title=$1,description=$2,price_minor=$3,category_id=$4,fulfillment_type=$5,status='published',updated_at=now() where id=$6",[body.title,body.description||null,body.priceMinor,body.categoryId||null,body.fulfillmentType,id]);
   await c.query("update inventory set stock=$1,updated_at=now() where product_id=$2",[body.stock,id]);
   if(body.imageUrl){await c.query("delete from product_images where product_id=$1",[id]);await c.query("insert into product_images(product_id,url,sort_order) values($1,$2,0)",[id,body.imageUrl]);}
