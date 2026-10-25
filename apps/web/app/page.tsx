@@ -256,16 +256,42 @@ function statusRu(s:string){return ({created:"Ожидает оплаты",paid:
 function Profile({user,sellerProducts,loadSeller,setMessage,categories,notifications,readNotification}:{user:User|null;sellerProducts:any[];loadSeller:()=>void;setMessage:(s:string)=>void;categories:any[];notifications:any[];readNotification:(id:string)=>Promise<void>}){
  const seller=user?.role==="seller";
  const admin=user?.role==="admin";
- const [mode,setMode]=useState<"profile"|"seller"|"favorites"|"notifications"|"admin">("profile");
+ const [mode,setMode]=useState<"profile"|"seller"|"favorites"|"notifications"|"admin"|"onboard">("profile");
  const [fav,setFav]=useState<any[]>([]);
  async function favorites(){const r=await fetch(api()+"/api/favorites",{headers:{Authorization:"tma "+(typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"")}});if(r.ok)setFav((await r.json()).items||[]);setMode("favorites")}
  if(mode==="notifications")return <div className="hero"><button className="icon-btn" onClick={()=>setMode("profile")}>←</button><h1>Уведомления</h1>{!notifications.length?<p>Новых событий пока нет.</p>:<div className="menu">{notifications.map(n=><button key={n.id} onClick={()=>readNotification(n.id)} style={{opacity:n.read_at?0.6:1,textAlign:"left"}}><span><b>{n.title}</b><br/><small>{n.body||""}</small></span><span>{n.read_at?"":"●"}</span></button>)}</div>}</div>;
  if(mode==="favorites")return <div className="hero"><button className="icon-btn" onClick={()=>setMode("profile")}>←</button><h1>Избранное</h1>{!fav.length?<p>Здесь пока ничего нет.</p>:<div className="menu">{fav.map(x=><button key={x.id}>{x.title}<span>{money(x.price_minor,x.currency)} ›</span></button>)}</div>}</div>;
  if(mode==="seller")return <SellerPanel products={sellerProducts} loadSeller={loadSeller} setMessage={setMessage} back={()=>setMode("profile")} categories={categories}/>;
+ if(mode==="onboard")return <SellerOnboard setMessage={setMessage} onDone={()=>window.location.reload()} back={()=>setMode("profile")}/>;
  if(mode==="admin")return <AdminPanel setMessage={setMessage} back={()=>setMode("profile")}/>;
- return <div><div className="profile-card"><div className="row"><div className="avatar">{(user?.first_name||"Ч").slice(0,1)}</div><div><b>{user?.first_name||"Покупатель"}</b><div className="small">{seller?"Продавец":"Покупатель"}</div></div></div><div className="menu"><button onClick={favorites}>Избранное <span>♡ ›</span></button>{seller&&<button onClick={()=>{loadSeller();setMode("seller")}}>Кабинет продавца <span>›</span></button>}<button onClick={()=>setMode("notifications")}>Уведомления <span>{notifications.filter(n=>!n.read_at).length||""} ›</span></button>
+ return <div><div className="profile-card"><div className="row"><div className="avatar">{(user?.first_name||"Ч").slice(0,1)}</div><div><b>{user?.first_name||"Покупатель"}</b><div className="small">{seller?"Продавец":"Покупатель"}</div></div></div><div className="menu"><button onClick={favorites}>Избранное <span>♡ ›</span></button>{seller&&<button onClick={()=>{loadSeller();setMode("seller")}}>Кабинет продавца <span>›</span></button>}{!seller&&!admin&&<button onClick={()=>setMode("onboard")}>Стать продавцом <span>›</span></button>}<button onClick={()=>setMode("notifications")}>Уведомления <span>{notifications.filter(n=>!n.read_at).length||""} ›</span></button>
  {admin&&<button onClick={()=>setMode("admin")}>Админ-панель <span>›</span></button>}<button onClick={()=>setMessage("Безопасная оплата проходит внутри Telegram. Комиссия Nookly удерживается с продавца.")}>Оплата и безопасность <span>›</span></button><button onClick={()=>setMessage("Получение: продавец и покупатель договариваются о месте и времени в чате.")}>Как получить заказ <span>›</span></button></div></div></div>
 }
+function SellerOnboard({setMessage,onDone,back}:{setMessage:(s:string)=>void;onDone:()=>void;back:()=>void}){
+ const [storeName,setStoreName]=useState(""),[description,setDescription]=useState(""),[busy,setBusy]=useState(false);
+ async function submit(){
+  if(storeName.trim().length<2)return;
+  setBusy(true);
+  try{
+   const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
+   const r=await fetch(api()+"/api/seller/onboard",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init},body:JSON.stringify({storeName:storeName.trim(),description:description.trim()||undefined})});
+   if(!r.ok)throw new Error((await r.json()).error||"Не удалось открыть кабинет продавца");
+   setMessage("Кабинет продавца создан.");
+   onDone();
+  }catch(e){setMessage(e instanceof Error?e.message:"Ошибка");setBusy(false)}
+ }
+ return <div className="hero">
+  <button className="icon-btn" onClick={back}>←</button>
+  <h1>Стать продавцом</h1>
+  <p>Продавай товары в Nookly как обычный пользователь. Подписки и абонентской платы нет.</p>
+  <div className="form-card">
+   <input value={storeName} onChange={e=>setStoreName(e.target.value)} placeholder="Название магазина или имя" maxLength={100}/>
+   <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Коротко о товарах (необязательно)" rows={4} maxLength={1000}/>
+   <button className="primary wide" disabled={busy||storeName.trim().length<2} onClick={submit}>{busy?"Создаём кабинет…":"Открыть кабинет продавца"}</button>
+  </div>
+ </div>
+}
+
 function AdminPanel({setMessage,back}:{setMessage:(s:string)=>void;back:()=>void}){
  const [dash,setDash]=useState<any>(null),[payouts,setPayouts]=useState<any[]>([]),[disputes,setDisputes]=useState<any[]>([]),[moderation,setModeration]=useState<any[]>([]);
  const init=()=>typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"",h=()=>({Authorization:"tma "+init()});
