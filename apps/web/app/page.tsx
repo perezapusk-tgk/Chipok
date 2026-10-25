@@ -211,6 +211,25 @@ function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}) {
    finally{setBusy(false)}
  }
 
+
+ async function payOrder(orderId:string){
+   setBusy(true); setLocalMessage("");
+   try{
+     const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
+     if(!init){setLocalMessage("Открой Nookly внутри Telegram для оплаты.");return}
+     const r=await fetch(api()+"/api/orders/"+orderId+"/payment",{method:"POST",headers:{Authorization:"tma "+init}});
+     const d=await r.json();
+     if(!r.ok)throw new Error(d.error||"Не удалось открыть оплату");
+     const tg=typeof window!=="undefined"?window.Telegram?.WebApp:undefined;
+     if(!d.invoiceLink||typeof tg?.openInvoice!=="function")throw new Error("Окно оплаты Telegram недоступно");
+     tg.openInvoice(d.invoiceLink,(status)=>{
+       if(status==="paid"){setLocalMessage("Оплата получена. Проверяем заказ…");onLoad()}
+       else if(status==="cancelled")setLocalMessage("Оплата отменена. Заказ можно оплатить позже.");
+       else if(status==="failed")setLocalMessage("Оплата не прошла. Попробуйте ещё раз.");
+     });
+   }catch(e){setLocalMessage(e instanceof Error?e.message:"Ошибка оплаты")}
+   finally{setBusy(false)}
+ }
  if(active) return <div className="hero">
    {localMessage&&<p className="small">{localMessage}</p>}
    <button className="icon-btn" onClick={()=>setActive(null)}>←</button>
@@ -219,6 +238,7 @@ function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}) {
    <div className="order-total">{money(Number(active.total_minor),active.currency)}</div>
    <div className="order-progress"><span className={["paid","seller_confirmed","ready_for_handover","completed"].includes(active.status)?"done":""}>Оплата</span><span className={["seller_confirmed","ready_for_handover","completed"].includes(active.status)?"done":""}>Подтверждение</span><span className={["ready_for_handover","completed"].includes(active.status)?"done":""}>Получение</span><span className={active.status==="completed"?"done":""}>Завершено</span></div>
    <div className="small">{new Date(active.created_at).toLocaleString("ru-RU")}</div>
+   {active.status==="created"&&<button className="primary wide" disabled={busy} onClick={()=>payOrder(active.id)}>{busy?"Открываем оплату…":"Оплатить заказ"}</button>}
 
    <div className="menu order-sellers">
      {(active.seller_orders||[]).map((so:any)=><div className="order-seller" key={so.id}>
