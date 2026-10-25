@@ -462,7 +462,6 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
  return {ok:true};
 });
 
-app.setErrorHandler((error,req,reply)=>{req.log.error({err:error},"Unhandled API error");const err:any=error;const status=Number(err.statusCode)||500;const safe=status>=500?(err.message||"Internal server error"):err.message;reply.code(status).send({error:safe});});
 await runMigrations();
 await configureTelegramWebhook().catch(error=>app.log.error(error,"Failed to configure Telegram webhook"));
 await app.listen({host:"0.0.0.0",port:Number(process.env.PORT||3001)});
