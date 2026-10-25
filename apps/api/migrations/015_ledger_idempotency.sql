@@ -14,8 +14,9 @@ create unique index if not exists uq_platform_ledger_order_type
   where order_id is not null;
 
 -- Backfill commission ledger entries for orders that were already completed.
+-- The unique index is partial, so repeat its predicate in the conflict target.
 insert into platform_ledger_entries(order_id,type,amount_minor,currency,description)
 select o.id,'commission',o.platform_fee_minor,o.currency,'Комиссия ЧИПОК'
 from orders o
 where o.status='completed' and o.platform_fee_minor>0
-on conflict (order_id,type) do nothing;
+on conflict (order_id,type) where order_id is not null do nothing;
