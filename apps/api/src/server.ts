@@ -417,7 +417,7 @@ app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders(
  if(result.kind==="not_payable")return reply.code(409).send({error:"Order is not payable"});
  if(result.kind==="paid")return reply.code(409).send({error:"Order is already paid"});
  if(result.kind==="expired"){await expireUnpaidOrders();return reply.code(409).send({error:"Order expired"});}
- return {invoiceLink:result.invoiceLink,provider:"paymaster"};
+ return {invoiceLink:result.invoiceLink,provider:"telegram"};
 });
 
 app.get("/api/payments/telegram/webhook",async()=>({ok:true,route:"telegram-payment-webhook",method:"POST",message:"Этот адрес предназначен для Telegram webhook. Mini App должен открываться по TELEGRAM_WEBAPP_URL."}));
