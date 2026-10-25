@@ -17,8 +17,9 @@ import { runMigrations } from "./migrate.js";
 const app=Fastify({logger:true});
 app.setErrorHandler((error,req,reply)=>{
   req.log.error({err:error},"Unhandled API error");
-  const status=Number((error as any).statusCode)||500;
-  const safe=status>=500 ? (error.message||"Internal server error") : error.message;
+  const err:any=error;
+  const status=Number(err.statusCode)||500;
+  const safe=status>=500 ? (err.message||"Internal server error") : err.message;
   reply.code(status).send({error:safe});
 });
 app.addHook("onSend",async(_req,reply)=>{
