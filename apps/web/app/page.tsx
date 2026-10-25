@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 
 type Product = {
   id:string; title:string; price_minor?:number; price?:number; currency?:string;
@@ -149,7 +150,7 @@ export default function Home(){
 
 function Card({p,open,add,toggleFavorite,isFavorite}:{p:Product;open:()=>void;add:()=>void;toggleFavorite:(p:Product)=>void;isFavorite:boolean}){const price=p.price_minor??Math.round((p.price||0)*100);return <article className="card"><button onClick={open} style={{border:0,padding:0,width:"100%",background:"transparent",color:"inherit",textAlign:"left"}}><div className="card-img"><img src={p.image||p.image_url||""} alt={p.title}/><span className="badge">{(p.available_stock??1)>0?"В наличии":"Нет в наличии"}</span></div><div className="card-body"><div className="card-title">{p.title}</div><div className="rating"><b>★ {p.rating||"—"}</b> {p.reviews?"("+p.reviews+")":""}</div><div className="seller">{p.seller||"Продавец"}</div><div className="price">{money(price,p.currency)}</div></div></button><button className="bookmark" aria-label={(isFavorite?"Удалить из":"Добавить в")+" избранное: "+p.title} onClick={e=>{e.stopPropagation();toggleFavorite(p)}}>{isFavorite?"♥":"♡"}</button><button className="primary card-buy" disabled={(p.available_stock??1)<=0} onClick={e=>{e.stopPropagation();add()}}>{(p.available_stock??1)>0?"В корзину":"Нет в наличии"}</button></article>}
 
-function Cart({cart,total,setCart,checkout,loading}:{cart:Product[];total:number;setCart:React.Dispatch<React.SetStateAction<Product[]>>;checkout:()=>void;loading:boolean}){
+function Cart({cart,total,setCart,checkout,loading}:{cart:Product[];total:number;setCart:Dispatch<SetStateAction<Product[]>>;checkout:()=>void;loading:boolean}){
  const groups=Array.from(new Map(cart.map(p=>[p.id,{p,count:cart.filter(x=>x.id===p.id).length}])).values());
  return <div className="hero"><h1>Корзина</h1>{!cart.length?<p>Корзина пуста. Добавь товары из каталога.</p>:groups.map(({p,count})=><div className="row" key={p.id} style={{padding:"12px 0",borderBottom:"1px solid #20323b",gap:10}}><img src={p.image||p.image_url||""} alt="" width="54" height="54" style={{borderRadius:12,objectFit:"cover"}}/><div style={{flex:1,minWidth:0}}><b style={{fontSize:12}}>{p.title}</b><div className="small">{p.seller||"Продавец"} · {count} шт.</div><div className="row" style={{marginTop:7,gap:6}}><button className="secondary mini" onClick={()=>{const i=cart.findIndex(x=>x.id===p.id);if(i>=0){const next=[...cart];next.splice(i,1);setCart(next)}}}>−</button><b>{count}</b><button className="secondary mini" onClick={()=>{setCart([...cart,p])}}>+</button><button className="secondary mini" onClick={()=>{setCart(cart.filter(x=>x.id!==p.id))}}>Удалить</button></div></div><b>{money((p.price_minor??Math.round((p.price||0)*100))*count,p.currency)}</b></div>)}{cart.length>0&&<><p className="small">Комиссия Nookly 5% удерживается из суммы продавца, а не добавляется покупателю.</p><h2>Итого {money(total,"RUB")}</h2><button className="primary wide" onClick={checkout} disabled={loading}>{loading?"Создаём оплату…":"Оформить и оплатить в Telegram"}</button></>}</div>}
 
