@@ -3,7 +3,7 @@
   "functions": {
     "api/index.ts": {
       "maxDuration": 60,
-      "includeFiles": ["apps/api/migrations/**/*.sql"]
+      "includeFiles": "apps/api/migrations/**/*.sql"
     }
   },
   "rewrites": [
