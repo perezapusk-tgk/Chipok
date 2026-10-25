@@ -4,7 +4,7 @@ import { z } from "zod";
 import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv } from "node:crypto";
 import { pool, withTransaction } from "./db.js";
 import { validateTelegramInitData } from "./telegram.js";
-import { getPayMasterPayment, createPayMasterInvoice } from "./paymaster.js";
+import { answerPreCheckout, createTelegramInvoiceLink } from "./telegram-payments.js";
 import { runMigrations } from "./migrate.js";
 const app=Fastify({logger:true});
 app.addHook("onSend",async(_req,reply)=>{
@@ -378,10 +378,11 @@ app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders(
   if(order.expires_at&&new Date(order.expires_at).getTime()<=Date.now())return {kind:"expired" as const};
   const existing=(await c.query("select status,payload,invoice_link,amount_minor,currency,provider from payments where order_id=$1 for update",[id])).rows[0];
   if(existing?.status==="paid")return {kind:"paid" as const};
-  if(existing?.status==="pending"&&existing.invoice_link&&existing.provider==="paymaster"&&Number(existing.amount_minor)===Number(order.total_minor)&&existing.currency===order.currency)return {kind:"ready" as const,invoiceLink:existing.invoice_link};
-  const invoice=await createPayMasterInvoice({orderId:id,title:String(order.first_title),description:"Оплата заказа ЧИПОК "+id,amountMinor:Number(order.total_minor),currency:order.currency});
-  await c.query("insert into payments(order_id,provider,provider_payment_id,status,amount_minor,currency,payload,invoice_link) values($1,'paymaster',$2,'pending',$3,$4,$5,$6) on conflict(order_id) do update set provider='paymaster',provider_payment_id=excluded.provider_payment_id,status='pending',amount_minor=excluded.amount_minor,currency=excluded.currency,payload=excluded.payload,invoice_link=excluded.invoice_link,updated_at=now()",[id,invoice.paymentId,order.total_minor,order.currency,"paymaster:"+invoice.paymentId,invoice.url]);
-  return {kind:"ready" as const,invoiceLink:invoice.url};
+  if(existing?.status==="pending"&&existing.invoice_link&&existing.provider==="telegram"&&Number(existing.amount_minor)===Number(order.total_minor)&&existing.currency===order.currency)return {kind:"ready" as const,invoiceLink:existing.invoice_link};
+  const payload="chipok:"+id+":"+randomUUID();
+  const invoiceLink=await createTelegramInvoiceLink({title:"ЧИПОК · "+String(order.first_title).slice(0,24),description:"Оплата заказа "+id,payload,amountMinor:Number(order.total_minor),currency:order.currency});
+  await c.query("insert into payments(order_id,provider,provider_payment_id,status,amount_minor,currency,payload,invoice_link) values($1,'telegram',null,'pending',$2,$3,$4,$5) on conflict(order_id) do update set provider='telegram',status='pending',amount_minor=excluded.amount_minor,currency=excluded.currency,payload=excluded.payload,invoice_link=excluded.invoice_link,updated_at=now()",[id,order.total_minor,order.currency,payload,invoiceLink]);
+  return {kind:"ready" as const,invoiceLink};
  });
  if(result.kind==="not_found")return reply.code(404).send({error:"Order not found"});
  if(result.kind==="not_payable")return reply.code(409).send({error:"Order is not payable"});
@@ -390,35 +391,36 @@ app.post("/api/orders/:id/payment",async(req,reply)=>{ await expireUnpaidOrders(
  return {invoiceLink:result.invoiceLink,provider:"paymaster"};
 });
 
-app.post("/api/payments/paymaster/webhook",async(req,reply)=>{
+app.post("/api/payments/telegram/webhook",async(req,reply)=>{
+ const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;if(!secret)return reply.code(503).send({error:"Payment webhook secret is not configured"});if(req.headers["x-telegram-bot-api-secret-token"]!==secret)return reply.code(401).send({error:"Unauthorized"});
  const update:any=req.body;
- const paymentId=String(update?.id||"");
- if(!paymentId)return reply.code(400).send({error:"Missing payment id"});
- try{
-  const remote=await getPayMasterPayment(paymentId);
-  if(remote.status!=="Settled")return {ok:true,status:remote.status};
-  const result=await withTransaction(async(c)=>{
-   const p=(await c.query("select p.*,o.buyer_id,o.status as order_status,o.expires_at,o.total_minor,o.currency from payments p join orders o on o.id=p.order_id where p.provider='paymaster' and p.provider_payment_id=$1 for update",[paymentId])).rows[0];
-   if(!p)return {kind:"ignored" as const};
-   if(p.order_status==="paid"||p.status==="paid")return {kind:"already_paid" as const};
-   if(!remote.amount||Number(remote.amount.value)!==Number(p.amount_minor)/100||remote.amount.currency!==p.currency)throw new Error("PayMaster amount mismatch");
-   if(remote.merchantId&&remote.merchantId!==process.env.PAYMASTER_MERCHANT_ID)throw new Error("PayMaster merchant mismatch");
-   const inserted=await c.query("insert into payment_transactions(payment_id,idempotency_key,provider_event_id,event_type,payload) values($1,$2,$3,'payment_settled',$4) on conflict(idempotency_key) do nothing",[p.id,"paymaster:"+paymentId,paymentId,remote]);
-   if(!inserted.rowCount)return {kind:"already_processed" as const};
+ if(update.pre_checkout_query){
+  const q=update.pre_checkout_query;const payment=(await pool.query(`select p.amount_minor,p.currency,o.status,o.expires_at from payments p join orders o on o.id=p.order_id where p.payload=$1`,[q.invoice_payload])).rows[0];
+  const ok=!!payment&&(payment.status==="pending"||payment.status==="created")&&payment.status!=="expired"&&(!payment.expires_at||new Date(payment.expires_at).getTime()>Date.now())&&Number(payment.amount_minor)===Number(q.total_amount)&&payment.currency===q.currency;
+  await answerPreCheckout(String(q.id),ok,ok?undefined:"Заказ недоступен или сумма изменилась.");
+ }
+ if(update.message?.successful_payment){
+  const sp=update.message.successful_payment;const payload=sp.invoice_payload;
+  await withTransaction(async(c)=>{
+   const p=(await c.query(`select p.*,o.buyer_id,o.status as order_status,o.expires_at from payments p join orders o on o.id=p.order_id where p.payload=$1 for update`,[payload])).rows[0];if(!p||p.order_status!=="created")return;
    if(p.expires_at&&new Date(p.expires_at).getTime()<=Date.now()){
-    await c.query("update payments set status='refund_pending',updated_at=now() where id=$1",[p.id]);
-    await c.query("insert into refunds(order_id,payment_id,amount_minor,currency,status,reason) values($1,$2,$3,$4,'pending','Оплата PayMaster получена после истечения резерва') on conflict(order_id) do nothing",[p.order_id,p.id,Number(p.amount_minor),p.currency]);
+    await c.query("update payments set status='refund_pending',updated_at=now() where id=$1 and status<>'refunded'",[p.id]);
+    await c.query("insert into refunds(order_id,payment_id,amount_minor,currency,status,reason) values($1,$2,$3,$4,'pending','Оплата получена после истечения резерва') on conflict(order_id) do nothing",[p.order_id,p.id,Number(p.amount_minor),p.currency]);
     await c.query("update orders set status='disputed',updated_at=now() where id=$1 and status='created'",[p.order_id]);
-    return {kind:"refund_pending" as const};
+    await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'refund_pending','Требуется возврат','Оплата поступила после истечения резерва. Возврат ожидает подтверждения провайдера.' from orders where id=$1",[p.order_id]);
+    return;
    }
-   await c.query("update payments set status='paid',provider_payment_id=$1,updated_at=now() where id=$2",[paymentId,p.id]);
+   const u=(await c.query("select id from users where telegram_id=$1",[update.message.from?.id])).rows[0];if(!u||u.id!==p.buyer_id)throw new Error("Payment buyer mismatch");
+   if(Number(p.amount_minor)!==Number(sp.total_amount)||p.currency!==sp.currency)throw new Error("Payment amount mismatch");
+   const eventId=String(sp.telegram_payment_charge_id||sp.provider_payment_charge_id||"");if(!eventId)throw new Error("Missing payment event id");
+   const inserted=await c.query(`insert into payment_transactions(payment_id,idempotency_key,provider_event_id,event_type,payload) values($1,$2,$3,'successful_payment',$4) on conflict(idempotency_key) do nothing`,[p.id,`telegram:${eventId}`,eventId,sp]);if(!inserted.rowCount)return;
+   await c.query("update payments set status='paid',provider_payment_id=$1,telegram_charge_id=$2,provider_charge_id=$3,updated_at=now() where id=$4",[sp.provider_payment_charge_id||null,sp.telegram_payment_charge_id||null,sp.provider_payment_charge_id||null,p.id]);
    await c.query("update orders set status='paid',updated_at=now() where id=$1",[p.order_id]);
    await c.query("update seller_orders set status='paid' where order_id=$1",[p.order_id]);
    await c.query("insert into notifications(user_id,type,title,body) select seller_id,'order_paid','Новый оплаченный заказ','Покупатель оплатил заказ. Проверьте наличие товара и подтвердите заказ.' from seller_orders where order_id=$1",[p.order_id]);
-   return {kind:"paid" as const};
   });
-  return {ok:true,status:result.kind};
- }catch(error){req.log.error(error,"PayMaster webhook verification failed");return reply.code(400).send({error:"Payment notification rejected"});}
+ }
+ return {ok:true};
 });
 
 app.setErrorHandler((error,req,reply)=>{req.log.error(error);const err=error as any;const status=err.statusCode??(err.name==="ZodError"?400:500);reply.code(status).send({error:status===500?"Internal server error":err.message})});
