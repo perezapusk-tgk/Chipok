@@ -19,7 +19,7 @@ app.setErrorHandler((error,req,reply)=>{
   req.log.error({err:error},"Unhandled API error");
   const err:any=error;
   const status=Number(err.statusCode)||500;
-  const safe=status>=500 ? (err.message||"Internal server error") : err.message;
+  const safe=status>=500 ? "Internal server error" : (err.message||"Request failed");
   reply.code(status).send({error:safe});
 });
 app.addHook("onSend",async(_req,reply)=>{
