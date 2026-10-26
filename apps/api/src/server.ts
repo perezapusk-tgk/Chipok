@@ -27,7 +27,7 @@ app.addHook("onSend",async(_req,reply)=>{
  reply.header("X-Frame-Options","DENY");
  reply.header("Referrer-Policy","no-referrer");
  reply.header("Permissions-Policy","camera=(),microphone=(),geolocation=()");
- reply.header("Cross-Origin-Resource-Policy","same-site");
+ reply.header("Cross-Origin-Resource-Policy","cross-origin");
 });
 const allowedOrigins=(process.env.CORS_ALLOWED_ORIGINS||process.env.TELEGRAM_WEBAPP_URL||"").split(",").map(x=>x.trim()).filter(Boolean);
 const builtInOrigins=["https://perezapusk-tgk.github.io"];
