@@ -236,7 +236,7 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
     [seller.id,so.order_id,Number(sellerOrder.seller_amount_minor),orderCurrency]);
   const completedOrder=(await c.query("select status,platform_fee_minor,currency from orders where id=$1",[so.order_id])).rows[0];
   if(completedOrder?.status==="completed"){
-    await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия Nookly') on conflict (order_id,type) do nothing",
+    await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'commission',$2,$3,'Комиссия Nookly') on conflict (order_id,type) where order_id is not null do nothing",
       [so.order_id,Number(completedOrder.platform_fee_minor),completedOrder.currency]);
   }
   await c.query("update seller_profiles set completed_sales=completed_sales+1 where user_id=$1",[seller.id]);
