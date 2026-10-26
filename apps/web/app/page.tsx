@@ -53,7 +53,7 @@ export default function Home(){
  async function load(){
    let catalogLoaded=false;
    try{
-     const r=await fetch(api()+"/api/catalog?limit=50",{cache:"no-store"});
+     const catalogUrl=new URL(api()+"/api/catalog"); catalogUrl.searchParams.set("limit","50"); catalogUrl.searchParams.set("_catalog","20261026"); const r=await fetch(catalogUrl.toString(),{cache:"no-store",headers:{"Accept":"application/json"}});
      if(r.ok){
        const d=await r.json();
        const apiItems=(d.items||[]).map((p:any)=>({...p,price_minor:Number(p.price_minor),price:Number(p.price_minor)/100,image:p.image_url,seller:p.store_name||p.seller_first_name||(p.seller_username?"@"+p.seller_username:"Продавец Nookly")}));
