@@ -131,3 +131,10 @@ body{letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
 .bottom .nav-sticker{width:30px;height:30px;display:grid;place-items:center;transition:transform .16s,filter .16s}.bottom .nav-sticker img{width:30px;height:30px;display:block;object-fit:contain;filter:saturate(.7) brightness(.82);transition:transform .16s,filter .16s}.bottom .nav-label{font-size:7px;font-weight:600;line-height:1.05;white-space:nowrap}
 .bottom .nav.active{background:linear-gradient(180deg,#172b32,#122127)!important;color:#f0c76c!important;box-shadow:inset 0 0 0 1px #3b4a48}.bottom .nav.active .nav-sticker{transform:translateY(-1px)}.bottom .nav.active .nav-sticker img{filter:saturate(1.05) brightness(1) drop-shadow(0 4px 7px #0007);transform:scale(1.08)}.bottom .nav:hover{background:#12232a}.bottom .nav:active{transform:scale(.96)}
 @media(max-width:380px){.bottom{height:68px!important;padding:5px 5px 6px!important}.bottom .nav{height:55px!important}.bottom .nav-sticker,.bottom .nav-sticker img{width:28px;height:28px}.bottom .nav-label{font-size:6.5px}}
+
+/* Restore previous Nookly navigation */
+.bottom .nav{height:49px!important;padding:5px 2px 4px!important;gap:3px!important;border-radius:14px!important;font-size:7px!important}
+.bottom .nav strong{display:grid!important;place-items:center!important;width:25px!important;height:25px!important;border-radius:9px!important;font-size:15px!important;font-weight:600!important;background:transparent!important;color:#89979c!important;filter:saturate(.75)!important;transform:none!important}
+.bottom .nav.active strong{background:transparent!important;color:inherit!important;box-shadow:none!important;filter:saturate(1)!important;transform:translateY(-1px)!important}
+.bottom .nav-label{font-size:7px;font-weight:400;line-height:1.05}
+@media(max-width:380px){.bottom .nav{height:48px!important}.bottom .nav strong{width:23px!important;height:23px!important;font-size:13px!important}.bottom .nav-label{font-size:6.5px}}
