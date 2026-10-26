@@ -317,7 +317,7 @@ function Profile({user,sellerProducts,loadSeller,setMessage,categories,notificat
   {!fav.length?<div className="empty-state"><b>Избранное пусто</b><span>Сохраняй товары, чтобы быстро вернуться к ним позже.</span></div>:
    <div className="menu">{fav.map((x:any)=><button key={x.id} onClick={()=>openProduct(x.id)}><span>{x.title}</span><span>{money(Number(x.price_minor),x.currency)} ›</span></button>)}</div>}
  </div>;
- if(mode==="seller")return <SellerPanel products={sellerProducts} loadSeller={loadSeller} setMessage={setMessage} back={()=>setMode("profile")} categories={categories}/>;
+ if(mode==="seller")return <SellerPanel products={sellerProducts} loadSeller={loadSeller} setSellerProducts={setSellerProducts} setMessage={setMessage} back={()=>setMode("profile")} categories={categories}/>;
  if(mode==="onboard")return <SellerOnboard setMessage={setMessage} onDone={()=>window.location.reload()} back={()=>setMode("profile")}/>;
  if(mode==="admin")return <AdminPanel setMessage={setMessage} back={()=>setMode("profile")}/>;
  return <div className="profile-page">
@@ -375,7 +375,7 @@ function AdminPanel({setMessage,back}:{setMessage:(s:string)=>void;back:()=>void
 <button className="icon-btn" onClick={back}>←</button><div className="seller-hero"><div><div className="eyebrow">АДМИНИСТРАТОР</div><h1>Панель Nookly</h1><p>Контроль продаж, споров, выводов и модерации.</p></div><div className="balance">{money(Number(dash?.commissionMinor||0),"RUB")}</div></div><div className="seller-stats"><div><b>{dash?.users||0}</b><span>Пользователей</span></div><div><b>{dash?.sellers||0}</b><span>Продавцов</span></div><div><b>{dash?.orders||0}</b><span>Заказов</span></div><div><b>{dash?.openDisputes||0}</b><span>Споров</span></div></div><div className="section-head"><h2>Модерация</h2><span>{moderation.length}</span></div><div className="seller-products">{!moderation.length?<div className="empty">Нет товаров на проверке.</div>:moderation.map(x=><div className="seller-product" key={x.id}><div><b>{x.title}</b><span>{x.seller_name} · {money(Number(x.price_minor),x.currency)}</span></div><div className="row"><button className="primary mini" onClick={()=>moderate(x.product_id,"approve")}>Одобрить</button><button className="secondary mini" onClick={()=>moderate(x.product_id,"reject")}>Отклонить</button></div></div>)}</div><div className="section-head"><h2>Выводы</h2><span>{payouts.filter(x=>x.status==="pending").length} ожидают</span></div><div className="seller-products">{!payouts.length?<div className="empty">Заявок нет.</div>:payouts.map(x=><div className="seller-product" key={x.id}><div><b>{x.seller_name||"Продавец"}</b><span>{x.status} · {new Date(x.created_at).toLocaleString("ru-RU")}</span></div>{x.status==="pending"?<div className="row"><button className="primary mini" onClick={()=>resolvePayout(x.id,"completed")}>Выплатить</button><button className="secondary mini" onClick={()=>resolvePayout(x.id,"failed")}>Отклонить</button></div>:<strong>{money(Number(x.amount_minor),x.currency)}</strong>}</div>)}</div><div className="section-head"><h2>Споры</h2><span>{disputes.filter(x=>x.status==="open").length} открытых</span></div><div className="seller-products">{!disputes.length?<div className="empty">Споров нет.</div>:disputes.map(x=><div className="seller-product" key={x.id}><div><b>{x.buyer_name||"Покупатель"} · {x.reason}</b><span>{x.description}</span></div>{x.status==="open"?<div className="row"><button className="primary mini" onClick={()=>resolveDispute(x.id,"refund")}>Возврат</button><button className="secondary mini" onClick={()=>resolveDispute(x.id,"reject")}>Отклонить</button></div>:<strong>{x.status}</strong>}</div>)}</div></div>
 }
 
-function SellerPanel({products,loadSeller,setMessage,back,categories}:{products:any[];loadSeller:()=>void;setMessage:(s:string)=>void;back:()=>void;categories:any[]}){
+function SellerPanel({products,loadSeller,setSellerProducts,setMessage,back,categories}:{products:any[];loadSeller:()=>void;setSellerProducts:(items:any[])=>void;setMessage:(s:string)=>void;back:()=>void;categories:any[]}){
  const [form,setForm]=useState(false),[editingId,setEditingId]=useState<string|null>(null),[title,setTitle]=useState(""),[price,setPrice]=useState(""),[stock,setStock]=useState("1"),[description,setDescription]=useState(""),[imageUrl,setImageUrl]=useState(""),[imageMode,setImageMode]=useState<"upload"|"search">("upload"),[imageQuery,setImageQuery]=useState(""),[imageResults,setImageResults]=useState<any[]>([]),[imageSearching,setImageSearching]=useState(false),[categoryId,setCategoryId]=useState(""),[fulfillment,setFulfillment]=useState<"pickup"|"meeting">("pickup"),[saving,setSaving]=useState(false);
  const [balance,setBalance]=useState<any>(null),[sellerOrders,setSellerOrders]=useState<any[]>([]),[payout,setPayout]=useState(""),[reliability,setReliability]=useState<any>(null);\n const [deleteTarget,setDeleteTarget]=useState<any|null>(null),[handoverTarget,setHandoverTarget]=useState<any|null>(null),[handoverCode,setHandoverCode]=useState(""),[actionBusy,setActionBusy]=useState(false);
  const init=()=>typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
@@ -443,16 +443,17 @@ async function deleteProduct(p:any){
 }
 async function submitDelete(){
  if(!deleteTarget||actionBusy)return;
+ const target=deleteTarget;
  setActionBusy(true);
+ setMessage("Удаляем товар…");
  try{
-  const r=await fetch(api()+"/api/seller/products/"+deleteTarget.id,{method:"DELETE",headers:{Authorization:"tma "+init()}});
+  const r=await fetch(api()+"/api/seller/products/"+target.id,{method:"DELETE",headers:{Authorization:"tma "+init()}});
   let body:any=null;try{body=await r.json()}catch{}
   if(!r.ok){setMessage(body?.error||("Не удалось удалить товар ("+r.status+")"));return}
-  const title=deleteTarget.title;
-  setSellerProducts(prev=>prev.filter((x:any)=>x.id!==deleteTarget.id));
+  setSellerProducts((prev:any[])=>prev.filter((x:any)=>x.id!==target.id));
   setDeleteTarget(null);
   await loadSeller();
-  setMessage(body?.mode==="archived"?"Товар «"+title+"» скрыт из каталога, история заказов сохранена.":"Товар «"+title+"» удалён.");
+  setMessage(body?.mode==="archived"?"Товар скрыт из каталога.":"Товар удалён.");
  }catch(e){
   setMessage(e instanceof Error?e.message:"Не удалось удалить товар");
  }finally{setActionBusy(false)}
