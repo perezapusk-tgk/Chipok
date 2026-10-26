@@ -3,7 +3,7 @@
   "functions": {
     "api/index.ts": {
       "maxDuration": 60,
-      "includeFiles": "apps/api/migrations/**"
+      "includeFiles": "migrations/**"
     }
   },
   "rewrites": [
