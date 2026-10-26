@@ -75,23 +75,39 @@ async function configureTelegramWebhook(){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;
  const webhookBaseUrl=process.env.TELEGRAM_WEBHOOK_URL;
- if(!token||!secret||!webhookBaseUrl){app.log.info("Telegram webhook auto-registration skipped: set TELEGRAM_WEBHOOK_URL to the API origin to enable it");return;}
+ if(!token||!secret||!webhookBaseUrl){
+  app.log.info("Telegram webhook auto-registration skipped: set TELEGRAM_WEBHOOK_URL to the API origin to enable it");
+  return;
+ }
  const webhookUrl=new URL("/api/payments/telegram/webhook",webhookBaseUrl).toString();
- const r=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:webhookUrl,secret_token:secret,allowed_updates:["pre_checkout_query","message"],drop_pending_updates:false})});
- const data=await r.json() as {ok:boolean;description?:string};
- if(!data.ok){app.log.warn({description:data.description},"Telegram webhook registration failed");return;}
- const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть Nookly"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь"},{command:"terms",description:"Условия покупки"},{command:"support",description:"Поддержка"}]})});
- const commandsData=await commands.json() as {ok:boolean;description?:string};
- if(!commandsData.ok)app.log.warn({description:commandsData.description},"Telegram commands registration failed");
- const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
- if(webAppUrl){
+ try{
+  const infoResponse=await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`);
+  const info=await infoResponse.json() as {ok:boolean;result?:{url?:string};description?:string};
+  if(!info.ok) app.log.warn({description:info.description},"Telegram webhook info check failed");
+  if(info.ok&&info.result?.url===webhookUrl){
+   app.log.info({webhookUrl},"Telegram webhook already configured");
+  }else{
+   const r=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:webhookUrl,secret_token:secret,allowed_updates:["pre_checkout_query","message"],drop_pending_updates:false})});
+   const data=await r.json() as {ok:boolean;description?:string};
+   if(!data.ok){
+    app.log.warn({description:data.description},"Telegram webhook registration failed");
+    return;
+   }
+   app.log.info({webhookUrl},"Telegram webhook registered");
+  }
+  const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть Nookly"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь"},{command:"terms",description:"Условия покупки"},{command:"support",description:"Поддержка"}]})});
+  const commandsData=await commands.json() as {ok:boolean;description?:string};
+  if(!commandsData.ok)app.log.warn({description:commandsData.description},"Telegram commands registration failed");
+  const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
+  if(webAppUrl){
    const menu=await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({menu_button:{type:"web_app",text:"🛍 Nookly",web_app:{url:webAppUrl}}})});
    const menuData=await menu.json() as {ok:boolean;description?:string};
    if(!menuData.ok)app.log.warn({description:menuData.description},"Telegram menu button registration failed");
+  }
+ }catch(error){
+  app.log.warn({err:error},"Telegram webhook configuration request failed");
  }
- app.log.info({webhookUrl,webAppUrl},"Telegram webhook and Mini App menu configured");
 }
-
 app.get("/api/me",async(req)=>({user:await auth(req)}));
 app.post("/api/auth/telegram",async(req)=>({user:await auth(req)}));
 app.get("/api/categories",async()=>({items:(await pool.query("select id,name,slug,parent_id,restricted,age_restriction from categories order by name")).rows}));
