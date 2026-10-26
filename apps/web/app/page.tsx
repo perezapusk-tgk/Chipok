@@ -115,7 +115,7 @@ export default function Home(){
     const payment=await pr.json();
     if(!payment.invoiceLink||typeof tg.openInvoice!=="function")throw new Error("Telegram payment window is unavailable");
     const orderId=String(data.order.id);
-    setMessage("Открываем оплату PayMaster TEST…");
+    setMessage("Открываем оплату в Telegram…");
     tg.openInvoice(payment.invoiceLink,(status)=>{
       if(status==="paid"){
         setMessage("Telegram сообщил об оплате. Проверяем подтверждение на сервере…");loadOrders();
