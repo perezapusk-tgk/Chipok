@@ -7,6 +7,8 @@ async function resolveMigrationsDir() {
   const sourceDir = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
     path.resolve(sourceDir, "../migrations"),
+    path.resolve(sourceDir, "../../migrations"),
+    path.resolve(sourceDir, "../../../migrations"),
     path.resolve(process.cwd(), "migrations"),
     path.resolve(process.cwd(), "apps/api/migrations"),
   ];
@@ -28,7 +30,7 @@ export async function runMigrations() {
   )`);
 
   const dir = await resolveMigrationsDir();
-  const files = (await readdir(dir)).filter(x => /^\\d+_.*\\.sql$/.test(x)).sort();
+  const files = (await readdir(dir)).filter(x => /^\d+_.*\.sql$/.test(x)).sort();
 
   for (const filename of files) {
     const done = await pool.query("select 1 from schema_migrations where filename=$1", [filename]);
