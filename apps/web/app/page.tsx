@@ -168,11 +168,6 @@ export default function Home(){
  </section>
  <label className="search market-search">⌕<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Найти товар или категорию"/></label>
  <div className="chips">{categoryNames.map(c=><button key={c} className={"chip "+(cat===c?"active":"")} onClick={()=>setCat(c)}>{c}</button>)}</div>
- <div className="market-quick">
-   <button onClick={()=>setTab("orders")}><span>▣</span><b>Заказы</b><small>{orders.length?"Посмотреть текущие":"История покупок"}</small></button>
-   <button onClick={()=>setTab("profile")}><span>♡</span><b>Избранное</b><small>{favoriteIds.size?favoriteIds.size+" сохранено":"Сохраняй понравившееся"}</small></button>
-   <button onClick={()=>setTab("chat")}><span>◌</span><b>Чаты</b><small>Связаться с продавцом</small></button>
- </div>
  <div className="section-head"><h2>{cat==="Все"&&!q?"Популярное":cat}</h2><span>{items.length} товаров</span></div>
  {items.length?<div className="grid">{items.map(p=><Card key={p.id} p={p} open={()=>setSelected(p)} add={()=>add(p)} toggleFavorite={toggleFavorite} isFavorite={favoriteIds.has(p.id)}/>)}</div>:<div className="empty-state"><b>{q?"Ничего не нашли":"Пока нет товаров"}</b><span>{q?"Измени запрос или выбери другую категорию.":"Товары появятся здесь, когда продавцы их опубликуют."}</span></div>}
  </>
