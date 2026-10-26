@@ -30,7 +30,7 @@ const fallback:Product[]=[
 ];
 const cats=["Все"];
 const money=(minor:number,currency="RUB")=>new Intl.NumberFormat("ru-RU",{style:"currency",currency,maximumFractionDigits:0}).format(minor/100);
-const api=()=>process.env.NEXT_PUBLIC_API_URL||(process.env.NODE_ENV==="production"?"https://chipok-api.onrender.com":"http://localhost:3001");
+const api=()=>process.env.NEXT_PUBLIC_API_URL||(process.env.NODE_ENV==="production"?"https://nookly-api.vercel.app":"http://localhost:3001");
 const logo=()=>process.env.GITHUB_PAGES==="true"?"/Chipok/nookly-logo.svg":"/nookly-logo.svg";
 
 export default function Home(){
