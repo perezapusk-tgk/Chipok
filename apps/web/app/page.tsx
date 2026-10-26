@@ -378,7 +378,10 @@ function AdminPanel({setMessage,back}:{setMessage:(s:string)=>void;back:()=>void
 
 function SellerPanel({products,loadSeller,setSellerProducts,setMessage,back,categories}:{products:any[];loadSeller:()=>void;setSellerProducts:(items:any[])=>void;setMessage:(s:string)=>void;back:()=>void;categories:any[]}){
  const [form,setForm]=useState(false),[editingId,setEditingId]=useState<string|null>(null),[title,setTitle]=useState(""),[price,setPrice]=useState(""),[stock,setStock]=useState("1"),[description,setDescription]=useState(""),[imageUrl,setImageUrl]=useState(""),[imageMode,setImageMode]=useState<"upload"|"search">("upload"),[imageQuery,setImageQuery]=useState(""),[imageResults,setImageResults]=useState<any[]>([]),[imageSearching,setImageSearching]=useState(false),[categoryId,setCategoryId]=useState(""),[fulfillment,setFulfillment]=useState<"pickup"|"meeting">("pickup"),[saving,setSaving]=useState(false);
- const [balance,setBalance]=useState<any>(null),[sellerOrders,setSellerOrders]=useState<any[]>([]),[payout,setPayout]=useState(""),[reliability,setReliability]=useState<any>(null);
+ const [balance,setBalance]=useState<any>(null);
+ const [sellerOrders,setSellerOrders]=useState<any[]>([]);
+ const [payout,setPayout]=useState("");
+ const [reliability,setReliability]=useState<any>(null);
  const [deleteTarget,setDeleteTarget]=useState<any|null>(null),[handoverTarget,setHandoverTarget]=useState<any|null>(null),[handoverCode,setHandoverCode]=useState(""),[actionBusy,setActionBusy]=useState(false),[actionError,setActionError]=useState("");
  const init=()=>typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
  async function loadFinance(){const h={Authorization:"tma "+init()};const [b,o,r]=await Promise.all([fetch(api()+"/api/seller/balance",{headers:h}),fetch(api()+"/api/seller/orders",{headers:h}),fetch(api()+"/api/seller/reliability",{headers:h})]);if(b.ok)setBalance(await b.json());if(o.ok)setSellerOrders((await o.json()).items||[]);if(r.ok)setReliability(await r.json())}
