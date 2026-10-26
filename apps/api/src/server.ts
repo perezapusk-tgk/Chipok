@@ -133,7 +133,7 @@ app.get("/api/products/:id",async(req,reply)=>{
  if(!r.rowCount)return reply.code(404).send({error:"Product not found"});return {product:r.rows[0]};
 });
 app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
- const buyer=await auth(req); const body=z.object({items:z.array(z.object({productId:z.string().uuid(),quantity:z.number().int().min(1).max(100)})).min(1).max(100)}).parse(req.body);
+ const buyer=await auth(req); const body=z.object({items:z.array(z.object({productId:z.string().uuid(),quantity:z.number().int().min(1).max(100)})).min(1).max(100).superRefine((items,ctx)=>{const seen=new Set<string>();items.forEach((item,index)=>{if(seen.has(item.productId))ctx.addIssue({code:z.ZodIssueCode.custom,path:[index,"productId"],message:"Товар указан несколько раз"});seen.add(item.productId)})})}).parse(req.body);
  const order=await withTransaction(async(c)=>{
   const bps=Math.max(0,Math.min(10000,Number(process.env.PLATFORM_COMMISSION_BPS||500)));
   const o=(await c.query("insert into orders(buyer_id,status,total_minor,platform_fee_minor,expires_at) values($1,'created',0,0,now()+interval '30 minutes') returning id",[buyer.id])).rows[0];
