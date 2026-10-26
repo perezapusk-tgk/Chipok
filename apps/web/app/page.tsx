@@ -151,7 +151,30 @@ export default function Home(){
  };
  if(selected)return <div className="app"><main className="shell detail"><button className="icon-btn back" onClick={()=>setSelected(null)}>←</button><div className="detail-image"><img src={selected.image||selected.image_url||logo()} alt={selected.title} onError={e=>{e.currentTarget.src=logo()}}/></div><h1>{selected.title}</h1><div className="rating"><b>★ {selected.rating||"—"}</b> {selected.reviews?"("+selected.reviews+" отзыва)":""}</div><div className="seller">♙ {selected.seller||"Продавец Nookly"}</div><div className="price">{money(selected.price_minor??Math.round((selected.price||0)*100),selected.currency)}</div><div className="meta"><div>Наличие<b>{Number(selected.available_stock??0)>0?"В наличии":"Нет"}</b></div><div>Формат<b>{selected.fulfillment_type==="meeting"?"Встреча":"Самовывоз"}</b></div><div>Комиссия<b>5% с продавца</b></div></div><p className="desc">{selected.description||"Товар из каталога Nookly. Место и время получения покупатель согласовывает с продавцом в чате."}</p><div className="row" style={{gap:8}}>{selected.seller_id&&<button className="secondary wide" onClick={async()=>{const r=await fetch(api()+"/api/chat/threads",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({sellerId:selected.seller_id,productId:selected.id})});if(r.ok){setMessage("Чат с продавцом открыт. Перейди во вкладку «Чаты».");setTab("chat")}else setMessage("Не удалось открыть чат с продавцом")}}>Написать продавцу</button>}<button className="primary wide sticky-buy" disabled={Number(selected.available_stock??0)<=0} onClick={()=>{if(Number(selected.available_stock??0)>0){add(selected);setSelected(null)}}}>{Number(selected.available_stock??0)>0?"Добавить в корзину":"Нет в наличии"}</button></div></main></div>;
 
- const page=tab==="home"?<><label className="search">⌕<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Что ищем?"/></label><div className="chips">{categoryNames.map(c=><button key={c} className={"chip "+(cat===c?"active":"")} onClick={()=>setCat(c)}>{c}</button>)}</div><div className="section-head"><h2>Популярное</h2><span>{items.length} товаров</span></div>{items.length?<div className="grid">{items.map(p=><Card key={p.id} p={p} open={()=>setSelected(p)} add={()=>add(p)} toggleFavorite={toggleFavorite} isFavorite={favoriteIds.has(p.id)}/>)}</div>:<div className="empty-state"><b>{q?"Ничего не нашли":"Пока нет товаров"}</b><span>{q?"Измени запрос или выбери другую категорию.":"Товары появятся здесь, когда продавцы их опубликуют."}</span></div>}</>
+ const page=tab==="home"?<>
+ <section className="market-hero">
+   <div className="market-hero-glow"/>
+   <div className="market-hero-copy">
+     <span className="eyebrow">NOOKLY MARKET</span>
+     <h1>Выбери.<br/>Напиши. Забери.</h1>
+     <p>Товары от людей из твоего круга. Договорись о получении напрямую в чате.</p>
+     <div className="market-hero-actions">
+       <button className="primary" onClick={()=>setTab("catalog")}>Смотреть каталог</button>
+       <button className="secondary" onClick={()=>setTab("chat")}>Мои чаты</button>
+     </div>
+   </div>
+   <div className="market-hero-orb">N</div>
+ </section>
+ <label className="search market-search">⌕<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Найти товар или категорию"/></label>
+ <div className="chips">{categoryNames.map(c=><button key={c} className={"chip "+(cat===c?"active":"")} onClick={()=>setCat(c)}>{c}</button>)}</div>
+ <div className="market-quick">
+   <button onClick={()=>setTab("orders")}><span>▣</span><b>Заказы</b><small>{orders.length?"Посмотреть текущие":"История покупок"}</small></button>
+   <button onClick={()=>setTab("profile")}><span>♡</span><b>Избранное</b><small>{favoriteIds.size?favoriteIds.size+" сохранено":"Сохраняй понравившееся"}</small></button>
+   <button onClick={()=>setTab("chat")}><span>◌</span><b>Чаты</b><small>Связаться с продавцом</small></button>
+ </div>
+ <div className="section-head"><h2>{cat==="Все"&&!q?"Популярное":cat}</h2><span>{items.length} товаров</span></div>
+ {items.length?<div className="grid">{items.map(p=><Card key={p.id} p={p} open={()=>setSelected(p)} add={()=>add(p)} toggleFavorite={toggleFavorite} isFavorite={favoriteIds.has(p.id)}/>)}</div>:<div className="empty-state"><b>{q?"Ничего не нашли":"Пока нет товаров"}</b><span>{q?"Измени запрос или выбери другую категорию.":"Товары появятся здесь, когда продавцы их опубликуют."}</span></div>}
+ </>
  :tab==="catalog"?<><div className="hero"><h1>Каталог</h1><p>Товары от продавцов твоего круга. Без лишних посредников.</p></div><div className="grid">{items.map(p=><Card key={p.id} p={p} open={()=>setSelected(p)} add={()=>add(p)} toggleFavorite={toggleFavorite} isFavorite={favoriteIds.has(p.id)}/>)}</div></>
  :tab==="orders"?<Orders orders={orders} onLoad={loadOrders}/>
  :tab==="chat"?<Chats authHeaders={authHeaders} setMessage={setMessage}/>
