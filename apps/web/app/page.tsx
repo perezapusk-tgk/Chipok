@@ -78,7 +78,7 @@ export default function Home(){
  async function loadOrders(){const r=await fetch(api()+"/api/orders",{headers:authHeaders()});if(r.ok)setOrders((await r.json()).items||[])}
  async function loadNotifications(){const r=await fetch(api()+"/api/notifications",{headers:authHeaders()});if(r.ok)setNotifications((await r.json()).items||[])}
  async function readNotification(id:string){const r=await fetch(api()+"/api/notifications/"+id+"/read",{method:"POST",headers:authHeaders()});if(r.ok)setNotifications(prev=>prev.map(n=>n.id===id?{...n,read_at:new Date().toISOString()}:n))}
- async function loadSeller(){const r=await fetch(api()+"/api/seller/products",{headers:authHeaders()});if(r.ok)setSellerProducts((await r.json()).items||[])}
+ async function loadSeller(){const r=await fetch(api()+"/api/seller/products",{headers:authHeaders()});if(r.ok)setSellerProducts(((await r.json()).items||[]).filter((x:any)=>x.status!=="archived"))}
  const categoryNames=useMemo(()=>["Все",...categories.map((x:any)=>String(x.name)).filter(Boolean)], [categories]);
  const items=useMemo(()=>products.filter(p=>(cat==="Все"||p.category===cat||p.category_id===categories.find((x:any)=>x.name===cat)?.id)&&(!q||p.title.toLowerCase().includes(q.toLowerCase()))),[products,cat,q,categories]);
  const total=cart.reduce((s,p)=>s+Number(p.price_minor??Math.round((p.price||0)*100)),0);
@@ -399,6 +399,8 @@ async function submitHandover(){
   const r=await fetch(api()+"/api/seller-orders/"+handoverTarget.id+"/complete",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init()},body:JSON.stringify({code})});
   let body:any=null;try{body=await r.json()}catch{}
   if(!r.ok){setMessage(body?.error||("Не удалось подтвердить выдачу ("+r.status+")"));return}
+  const completedId=handoverTarget.id;
+  setSellerOrders(prev=>prev.map((x:any)=>x.id===completedId?{...x,status:"completed"}:x));
   setHandoverTarget(null);
   setHandoverCode("");
   await loadFinance();
@@ -447,6 +449,7 @@ async function submitDelete(){
   let body:any=null;try{body=await r.json()}catch{}
   if(!r.ok){setMessage(body?.error||("Не удалось удалить товар ("+r.status+")"));return}
   const title=deleteTarget.title;
+  setSellerProducts(prev=>prev.filter((x:any)=>x.id!==deleteTarget.id));
   setDeleteTarget(null);
   await loadSeller();
   setMessage(body?.mode==="archived"?"Товар «"+title+"» скрыт из каталога, история заказов сохранена.":"Товар «"+title+"» удалён.");
