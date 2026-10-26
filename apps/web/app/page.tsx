@@ -403,7 +403,7 @@ async function submitHandover(){
   const timer=window.setTimeout(()=>controller.abort(),15000);
   let r:Response;
   try{
-   r=await fetch(actionApi("/api/seller-orders/"+handoverTarget.id+"/complete",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init()},body:JSON.stringify({code}),signal:controller.signal});
+   r=await fetch(actionApi("/api/seller-orders/"+handoverTarget.id+"/complete"),{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init()},body:JSON.stringify({code}),signal:controller.signal});
   }finally{window.clearTimeout(timer)}
   let body:any=null;try{body=await r.json()}catch{}
   if(!r.ok){const msg=body?.error||("Не удалось подтвердить выдачу ("+r.status+")");setActionError(msg);setMessage(msg);return}
