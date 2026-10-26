@@ -5,9 +5,7 @@
       "src": "api/index.ts",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": [
-          "migrations/**"
-        ],
+        "includeFiles": ["migrations/**", "apps/api/migrations/**"],
         "maxDuration": 60
       }
     }
