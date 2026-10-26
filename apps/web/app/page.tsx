@@ -490,8 +490,8 @@ async function submitDelete(){
 
 
 function Chats({authHeaders,setMessage}:{authHeaders:()=>Record<string,string>;setMessage:(s:string)=>void}){
- const [threads,setThreads]=useState<any[]>([]),[active,setActive]=useState<any|null>(null),[messages,setMessages]=useState<any[]>([]),[text,setText]=useState(""),[busy,setBusy]=useState(false);
- async function load(){const r=await fetch(api()+"/api/chat/threads",{headers:authHeaders(),cache:"no-store"});if(r.ok)setThreads((await r.json()).items||[])}
+ const [threads,setThreads]=useState<any[]>([]),[active,setActive]=useState<any|null>(null),[messages,setMessages]=useState<any[]>([]),[text,setText]=useState(""),[busy,setBusy]=useState(false),[currentUserId,setCurrentUserId]=useState<string>("");
+ async function load(){const [r,me]=await Promise.all([fetch(api()+"/api/chat/threads",{headers:authHeaders(),cache:"no-store"}),fetch(api()+"/api/me",{headers:authHeaders(),cache:"no-store"})]);if(r.ok)setThreads((await r.json()).items||[]);if(me.ok){const d=await me.json();setCurrentUserId(String(d.user?.id||""));}}
  async function open(t:any){setActive(t);const r=await fetch(api()+"/api/chat/threads/"+t.id+"/messages",{headers:authHeaders(),cache:"no-store"});if(r.ok)setMessages((await r.json()).messages||[])}
  async function send(){
    const body=text.trim();if(!active||!body||busy)return;
@@ -513,7 +513,7 @@ function Chats({authHeaders,setMessage}:{authHeaders:()=>Record<string,string>;s
    <div className="chat-head"><div><h1>Чаты</h1><span className="small">{threads.length?threads.length+" диалогов":"Личные сообщения с продавцами"}</span></div>{!active&&<button className="secondary mini" onClick={load}>Обновить</button>}</div>
    {active?<><button className="secondary mini chat-back" onClick={()=>{setActive(null);setMessages([]);load()}}>← Все чаты</button>
      <div className="chat-thread-head"><b>{active.product_title||active.store_name||"Диалог"}</b><span>{active.seller_name||active.seller||"Продавец Nookly"}</span></div>
-     <div className="chat-messages">{messages.length?messages.map((m:any)=><div key={m.id} className={"chat-message "+(m.is_mine||m.from_me||m.sender_role==="buyer"&&active.buyer_id===m.sender_id?"mine":"theirs")}><div>{m.body}</div>{m.created_at&&<small>{new Date(m.created_at).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</small>}</div>):<div className="chat-empty">Начните диалог — договоритесь о месте и времени получения.</div>}</div>
+     <div className="chat-messages">{messages.length?messages.map((m:any)=><div key={m.id} className={"chat-message "+(m.is_mine||m.from_me||String(m.sender_id)===currentUserId?"mine":"theirs")}><div>{m.body}</div>{m.created_at&&<small>{new Date(m.created_at).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</small>}</div>):<div className="chat-empty">Начните диалог — договоритесь о месте и времени получения.</div>}</div>
      <div className="chat-compose"><input className="chat-input" value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}}} placeholder="Написать сообщение..." maxLength={2000}/><button className="primary chat-send" disabled={busy||!text.trim()} onClick={send}>{busy?"…":"➤"}</button></div>
    </>:threads.length?<div className="chat-list">{threads.map(t=><button className="chat-thread" key={t.id} onClick={()=>open(t)}><div className="chat-thread-icon">♙</div><div className="chat-thread-main"><b>{t.product_title||t.store_name||"Диалог"}</b><span>{t.last_message||"Открыть диалог"}</span></div><div className="chat-thread-meta"><small>{t.updated_at?new Date(t.updated_at).toLocaleDateString("ru-RU",{day:"2-digit",month:"2-digit"}):""}</small><strong>›</strong></div></button>)}</div>:<div className="chat-empty chat-empty-card">Открой товар и нажми «Написать продавцу», чтобы начать диалог.</div>}
  </div>
