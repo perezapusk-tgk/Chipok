@@ -74,8 +74,8 @@ app.get("/health",async()=>({ok:true,service:"chipok-api",name:"Nookly API",vers
 async function configureTelegramWebhook(){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;
- const webhookBaseUrl=process.env.TELEGRAM_WEBHOOK_URL||process.env.TELEGRAM_WEBAPP_URL;
- if(!token||!secret||!webhookBaseUrl){app.log.warn("Telegram webhook is not configured: missing TELEGRAM_BOT_TOKEN, TELEGRAM_PAYMENT_WEBHOOK_SECRET or TELEGRAM_WEBHOOK_URL");return;}
+ const webhookBaseUrl=process.env.TELEGRAM_WEBHOOK_URL;
+ if(!token||!secret||!webhookBaseUrl){app.log.info("Telegram webhook auto-registration skipped: set TELEGRAM_WEBHOOK_URL to the API origin to enable it");return;}
  const webhookUrl=new URL("/api/payments/telegram/webhook",webhookBaseUrl).toString();
  const r=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:webhookUrl,secret_token:secret,allowed_updates:["pre_checkout_query","message"],drop_pending_updates:false})});
  const data=await r.json() as {ok:boolean;description?:string};
