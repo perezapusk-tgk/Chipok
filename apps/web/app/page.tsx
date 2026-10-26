@@ -377,7 +377,7 @@ function AdminPanel({setMessage,back}:{setMessage:(s:string)=>void;back:()=>void
 
 function SellerPanel({products,loadSeller,setSellerProducts,setMessage,back,categories}:{products:any[];loadSeller:()=>void;setSellerProducts:(items:any[])=>void;setMessage:(s:string)=>void;back:()=>void;categories:any[]}){
  const [form,setForm]=useState(false),[editingId,setEditingId]=useState<string|null>(null),[title,setTitle]=useState(""),[price,setPrice]=useState(""),[stock,setStock]=useState("1"),[description,setDescription]=useState(""),[imageUrl,setImageUrl]=useState(""),[imageMode,setImageMode]=useState<"upload"|"search">("upload"),[imageQuery,setImageQuery]=useState(""),[imageResults,setImageResults]=useState<any[]>([]),[imageSearching,setImageSearching]=useState(false),[categoryId,setCategoryId]=useState(""),[fulfillment,setFulfillment]=useState<"pickup"|"meeting">("pickup"),[saving,setSaving]=useState(false);
- const [balance,setBalance]=useState<any>(null),[sellerOrders,setSellerOrders]=useState<any[]>([]),[payout,setPayout]=useState(""),[reliability,setReliability]=useState<any>(null);\n const [deleteTarget,setDeleteTarget]=useState<any|null>(null),[handoverTarget,setHandoverTarget]=useState<any|null>(null),[handoverCode,setHandoverCode]=useState(""),[actionBusy,setActionBusy]=useState(false);
+ const [balance,setBalance]=useState<any>(null),[sellerOrders,setSellerOrders]=useState<any[]>([]),[payout,setPayout]=useState(""),[reliability,setReliability]=useState<any>(null);\n const [deleteTarget,setDeleteTarget]=useState<any|null>(null),[handoverTarget,setHandoverTarget]=useState<any|null>(null),[handoverCode,setHandoverCode]=useState(""),[actionBusy,setActionBusy]=useState(false),[actionError,setActionError]=useState("");
  const init=()=>typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
  async function loadFinance(){const h={Authorization:"tma "+init()};const [b,o,r]=await Promise.all([fetch(api()+"/api/seller/balance",{headers:h}),fetch(api()+"/api/seller/orders",{headers:h}),fetch(api()+"/api/seller/reliability",{headers:h})]);if(b.ok)setBalance(await b.json());if(o.ok)setSellerOrders((await o.json()).items||[]);if(r.ok)setReliability(await r.json())}
  useEffect(()=>{loadFinance()},[]);
@@ -388,25 +388,35 @@ function SellerPanel({products,loadSeller,setSellerProducts,setMessage,back,cate
  async function completeOrder(id:string){
  setHandoverTarget(sellerOrders.find(o=>o.id===id)||{id});
  setHandoverCode("");
+ setActionError("");
  setActionBusy(false);
 }
 async function submitHandover(){
  if(!handoverTarget||actionBusy)return;
  const code=handoverCode.trim();
- if(!/^\d{6}$/.test(code)){setMessage("Код должен состоять из 6 цифр.");return}
+ if(!/^\d{6}$/.test(code)){setActionError("Введите ровно 6 цифр.");return}
  setActionBusy(true);
+ setActionError("");
  try{
-  const r=await fetch(api()+"/api/seller-orders/"+handoverTarget.id+"/complete",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init()},body:JSON.stringify({code})});
+  const controller=new AbortController();
+  const timer=window.setTimeout(()=>controller.abort(),15000);
+  let r:Response;
+  try{
+   r=await fetch(api()+"/api/seller-orders/"+handoverTarget.id+"/complete",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init()},body:JSON.stringify({code}),signal:controller.signal});
+  }finally{window.clearTimeout(timer)}
   let body:any=null;try{body=await r.json()}catch{}
-  if(!r.ok){setMessage(body?.error||("Не удалось подтвердить выдачу ("+r.status+")"));return}
+  if(!r.ok){const msg=body?.error||("Не удалось подтвердить выдачу ("+r.status+")");setActionError(msg);setMessage(msg);return}
   const completedId=handoverTarget.id;
   setSellerOrders(prev=>prev.map((x:any)=>x.id===completedId?{...x,status:"completed"}:x));
   setHandoverTarget(null);
   setHandoverCode("");
+  setActionError("");
   await loadFinance();
   setMessage("Получение подтверждено. Средства доступны для вывода.");
  }catch(e){
-  setMessage(e instanceof Error?e.message:"Не удалось подтвердить выдачу");
+  const msg=e instanceof DOMException&&e.name==="AbortError"?"Сервер не ответил за 15 секунд. Попробуйте ещё раз.":e instanceof Error?e.message:"Не удалось подтвердить выдачу";
+  setActionError(msg);
+  setMessage(msg);
  }finally{setActionBusy(false)}
 }
  async function searchImages(){
