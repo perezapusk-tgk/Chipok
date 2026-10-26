@@ -490,9 +490,9 @@ async function submitDelete(){
 
 
 function Chats({authHeaders,setMessage}:{authHeaders:()=>Record<string,string>;setMessage:(s:string)=>void}){
- const [threads,setThreads]=useState<any[]>([]),[active,setActive]=useState<any|null>(null),[messages,setMessages]=useState<any[]>([]),[text,setText]=useState(""),[busy,setBusy]=useState(false),[currentUserId,setCurrentUserId]=useState<string>("");
- async function load(){const [r,me]=await Promise.all([fetch(api()+"/api/chat/threads",{headers:authHeaders(),cache:"no-store"}),fetch(api()+"/api/me",{headers:authHeaders(),cache:"no-store"})]);if(r.ok)setThreads((await r.json()).items||[]);if(me.ok){const d=await me.json();setCurrentUserId(String(d.user?.id||""));}}
- async function open(t:any){setActive(t);const r=await fetch(api()+"/api/chat/threads/"+t.id+"/messages",{headers:authHeaders(),cache:"no-store"});if(r.ok)setMessages((await r.json()).messages||[])}
+ const [threads,setThreads]=useState<any[]>([]),[active,setActive]=useState<any|null>(null),[messages,setMessages]=useState<any[]>([]),[text,setText]=useState(""),[busy,setBusy]=useState(false),[currentUserId,setCurrentUserId]=useState<string>(""),[role,setRole]=useState<string>(""),[offers,setOffers]=useState<any[]>([]),[offerBusy,setOfferBusy]=useState(false);
+ async function load(){const [r,me,o]=await Promise.all([fetch(api()+"/api/chat/threads",{headers:authHeaders(),cache:"no-store"}),fetch(api()+"/api/me",{headers:authHeaders(),cache:"no-store"}),fetch(api()+"/api/chat/offers",{headers:authHeaders(),cache:"no-store"})]);if(r.ok)setThreads((await r.json()).items||[]);if(me.ok){const d=await me.json();setCurrentUserId(String(d.user?.id||""));setRole(String(d.user?.role||""));}if(o.ok)setOffers((await o.json()).items||[]);}
+ async function open(t:any){setActive(t);const [r,o]=await Promise.all([fetch(api()+"/api/chat/threads/"+t.id+"/messages",{headers:authHeaders(),cache:"no-store"}),fetch(api()+"/api/chat/offers",{headers:authHeaders(),cache:"no-store"})]);if(r.ok)setMessages((await r.json()).messages||[]);if(o.ok)setOffers((await o.json()).items||[])}
  async function send(){
    const body=text.trim();if(!active||!body||busy)return;
    setBusy(true);
@@ -503,17 +503,25 @@ function Chats({authHeaders,setMessage}:{authHeaders:()=>Record<string,string>;s
    }catch(e){setMessage(e instanceof Error?e.message:"Ошибка отправки")}
    finally{setBusy(false)}
  }
- useEffect(()=>{load()},[]);
- useEffect(()=>{
-   if(!active)return;
-   const timer=window.setInterval(()=>open(active),5000);
-   return()=>window.clearInterval(timer);
- },[active]);
+ async function acceptOffer(offer:any){
+   if(offerBusy)return;
+   setOfferBusy(true);setMessage("Оформляем заказ по предложению…");
+   try{
+     const r=await fetch(api()+"/api/chat/offers/"+offer.id+"/accept",{method:"POST",headers:authHeaders()});
+     const body=await r.json().catch(()=>null);
+     if(!r.ok)throw new Error(body?.error||"Не удалось принять предложение");
+     setMessage("Предложение принято. Заказ создан — перейдите в «Заказы» для оплаты.");
+     await load();if(active)await open(active);
+   }catch(e){setMessage(e instanceof Error?e.message:"Не удалось принять предложение")}
+   finally{setOfferBusy(false)}
+ }
+ const activeOffers=active?offers.filter((o:any)=>o.thread_id===active.id):[];
  return <div className="hero chat-page">
    <div className="chat-head"><div><h1>Чаты</h1><span className="small">{threads.length?threads.length+" диалогов":"Личные сообщения с продавцами"}</span></div>{!active&&<button className="secondary mini" onClick={load}>Обновить</button>}</div>
    {active?<><button className="secondary mini chat-back" onClick={()=>{setActive(null);setMessages([]);load()}}>← Все чаты</button>
      <div className="chat-thread-head"><b>{active.product_title||active.store_name||"Диалог"}</b><span>{active.seller_name||active.seller||"Продавец Nookly"}</span></div>
      <div className="chat-messages">{messages.length?messages.map((m:any)=><div key={m.id} className={"chat-message "+(m.is_mine||m.from_me||String(m.sender_id)===currentUserId?"mine":"theirs")}><div>{m.body}</div>{m.created_at&&<small>{new Date(m.created_at).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</small>}</div>):<div className="chat-empty">Начните диалог — договоритесь о месте и времени получения.</div>}</div>
+     {activeOffers.length>0&&<div className="chat-offers"><b>Предложения</b>{activeOffers.map((o:any)=><div className="chat-offer" key={o.id}><div><strong>{o.title}</strong><span>{(Number(o.price_minor)/100).toLocaleString("ru-RU",{minimumFractionDigits:2})} {o.currency} · {o.quantity} шт.</span><small>{o.status==="pending"?"Ожидает решения":o.status==="accepted"?"Принято":o.status==="rejected"?"Отклонено":"Истекло"}</small></div>{role!=="seller"&&o.status==="pending"&&<button className="primary mini" disabled={offerBusy} onClick={()=>acceptOffer(o)}>{offerBusy?"…":"Принять"}</button>}</div>)}</div>}
      <div className="chat-compose"><input className="chat-input" value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}}} placeholder="Написать сообщение..." maxLength={2000}/><button className="primary chat-send" disabled={busy||!text.trim()} onClick={send}>{busy?"…":"➤"}</button></div>
    </>:threads.length?<div className="chat-list">{threads.map(t=><button className="chat-thread" key={t.id} onClick={()=>open(t)}><div className="chat-thread-icon">♙</div><div className="chat-thread-main"><b>{t.product_title||t.store_name||"Диалог"}</b><span>{t.last_message||"Открыть диалог"}</span></div><div className="chat-thread-meta"><small>{t.updated_at?new Date(t.updated_at).toLocaleDateString("ru-RU",{day:"2-digit",month:"2-digit"}):""}</small><strong>›</strong></div></button>)}</div>:<div className="chat-empty chat-empty-card">Открой товар и нажми «Написать продавцу», чтобы начать диалог.</div>}
  </div>
