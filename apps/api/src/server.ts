@@ -550,7 +550,7 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
  const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;if(!secret)return reply.code(503).send({error:"Payment webhook secret is not configured"});if(req.headers["x-telegram-bot-api-secret-token"]!==secret)return reply.code(401).send({error:"Unauthorized"});
  const update:any=req.body;
  if(update.message?.text && update.message?.from?.id){
-  const command=String(update.message.text).trim().split(/\\s+/)[0].toLowerCase();
+  const command=String(update.message.text).trim().split(/\s+/)[0].toLowerCase();
   if(command==="/start"||command==="/shop"){
    const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
    await telegramSendMessage(update.message.chat.id,"Nookly — маркетплейс внутри Telegram.\n\nОткрой каталог и выбирай товары.",webAppUrl?{inline_keyboard:[[{text:"🛍 Открыть Nookly",web_app:{url:webAppUrl}}]]}:undefined);
