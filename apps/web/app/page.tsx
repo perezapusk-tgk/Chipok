@@ -464,8 +464,7 @@ async function submitDelete(){
   const r=await fetch(actionApi("/api/seller/products/"+target.id),{method:"DELETE",headers:{Authorization:"tma "+init()}});
   let body:any=null;try{body=await r.json()}catch{}
   if(!r.ok){setMessage(body?.error||("Не удалось удалить товар ("+r.status+")"));return}
-  setSellerProducts(prev=>prev.filter((x:any)=>x.id!==target.id));
-  setProducts(prev=>prev.filter((x:any)=>x.id!==target.id));
+  setSellerProducts((prev:any[])=>prev.filter((x:any)=>x.id!==target.id));
   setDeleteTarget(null);
   await loadSeller();
   setMessage(body?.mode==="archived"?"Товар скрыт из каталога.":"Товар удалён.");
