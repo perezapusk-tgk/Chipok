@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { pool } from "./db.js";
 
 export async function runMigrations() {
@@ -7,7 +8,7 @@ export async function runMigrations() {
     filename text primary key,
     applied_at timestamptz not null default now()
   )`);
-  const dir = path.resolve(process.cwd(), "apps/api/migrations");
+  const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../migrations");
   const files = (await readdir(dir)).filter(x => /^\d+_.*\.sql$/.test(x)).sort();
   for (const filename of files) {
     const done = await pool.query("select 1 from schema_migrations where filename=$1", [filename]);
