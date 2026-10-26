@@ -374,6 +374,9 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
     }
     await c.query("update seller_orders set status='refunded' where order_id=$1 and status<>'completed'",[d.order_id]);
     await c.query("update orders set status='refunded',updated_at=now() where id=$1",[d.order_id]);
+    const paymentRow=await c.query("select id from payments where order_id=$1 order by created_at desc limit 1",[d.order_id]);
+    const refundExists=await c.query("select 1 from refunds where order_id=$1",[d.order_id]);
+    if(!refundExists.rowCount) await c.query("insert into refunds(order_id,payment_id,amount_minor,currency,status,reason) values($1,$2,$3,$4,'pending',$5)",[d.order_id,paymentRow.rows[0]?.id||null,Number(order.total_minor),order.currency,"Возврат по спору "+id]);
     await c.query("update payments set status='refund_pending',updated_at=now() where order_id=$1 and status='paid'",[d.order_id]);
     await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'refund_pending','Возврат оформлен','Возврат зарегистрирован и ожидает подтверждения платёжного провайдера.' from orders where id=$1",[d.order_id]);
     await c.query("insert into notifications(user_id,type,title,body) select so.seller_id,'refund_pending','Возврат по спору','По заказу зарегистрирован возврат. Выплата продавцу не производится до завершения возврата.' from seller_orders so where so.order_id=$1",[d.order_id]);
