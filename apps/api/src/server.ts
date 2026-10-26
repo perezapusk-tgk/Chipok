@@ -70,7 +70,7 @@ async function auth(request:any){
  return r.rows[0];
 }
 app.get("/",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.3.4",health:"/health"}));
-app.get("/health",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.3.3"}));
+app.get("/health",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.3.4"}));
 async function configureTelegramWebhook(){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;
