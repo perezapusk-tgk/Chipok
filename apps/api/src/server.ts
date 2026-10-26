@@ -99,8 +99,212 @@ app.get("/api/catalog",async(req)=>{
  const q=z.object({search:z.string().trim().max(100).optional(),categoryId:z.string().uuid().optional(),limit:z.coerce.number().int().min(1).max(50).default(20),offset:z.coerce.number().int().min(0).default(0)}).parse(req.query);
  const values:any[]=[];const where:string[]=[`p.status='published'`];
  if(q.search){values.push(`%${q.search}%`);where.push(`(p.title ilike $${values.length} or coalesce(p.description,'') ilike $${values.length})`)}
- if(q.categoryId){values.push(q.categoryId);where.push(`p.category_id=$${values.length}`)} values.push(q.limit,q.offset);
- const r=await pool.query(`select p.id,p.title,p.description,p.price_minor,p.currency,p.seller_id,p.category_id,p.fulfillment_type,i.stock-i.reserved as available_stock,pi.url as image_url,s.name as store_name,u.first_name as seller_first_name,u.username as seller_username from products p join inventory i on i.product_id=p.id left join stores s on s.id=p.store_id left join users u on u.id=p.seller_id left join lateral(select url from product_images where product_id=p.id order by sort_order,id limit 1) pi on true where ${where.join(" and ")} and i.stock-i.reserved>0 order by p.created_at desc limit ${values.length-1} offset ${values.length}`,values);
+ if(q.categoryId){values.push(q.categoryId);where.push(`p.category_id=${values.length}`)}
+ const limitParam=values.length+1; const offsetParam=values.length+2; values.push(q.limit,q.offset);
+ const sql=`select p.id,p.title,p.description,p.price_minor,p.currency,p.seller_id,p.category_id,p.fulfillment_type,i.stock-i.reserved as available_stock,pi.url as image_url,s.name as store_name,u.first_name as seller_first_name,u.username as seller_username from products p join inventory i on i.product_id=p.id left join stores s on s.id=p.store_id left join users u on u.id=p.seller_id left join lateral(select url from product_images where product_id=p.id order by sort_order,id limit 1) pi on true where ${where.join(" and ")} and i.stock-i.reserved>0 order by p.created_at desc limit import Fastify from "fastify";
+import cors from "@fastify/cors";
+import { z } from "zod";
+import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv } from "node:crypto";
+import { pool, withTransaction } from "./db.js";
+import { validateTelegramInitData } from "./telegram.js";
+import { answerPreCheckout, createTelegramInvoiceLink } from "./telegram-payments.js";
+async function telegramSendMessage(chatId:number|string,text:string,replyMarkup?:Record<string,unknown>){
+ const token=process.env.TELEGRAM_BOT_TOKEN;
+ if(!token)return;
+ const body:Record<string,unknown>={chat_id:chatId,text,disable_web_page_preview:true};
+ if(replyMarkup)body.reply_markup=replyMarkup;
+ await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+}
+
+import { runMigrations } from "./migrate.js";
+export const app=Fastify({logger:true});
+app.setErrorHandler((error,req,reply)=>{
+  req.log.error({err:error},"Unhandled API error");
+  const err:any=error;
+  const status=Number(err.statusCode)||500;
+  const safe=status>=500 ? (err.message||"Internal server error") : err.message;
+  reply.code(status).send({error:safe});
+});
+app.addHook("onSend",async(_req,reply)=>{
+ reply.header("X-Content-Type-Options","nosniff");
+ reply.header("X-Frame-Options","DENY");
+ reply.header("Referrer-Policy","no-referrer");
+ reply.header("Permissions-Policy","camera=(),microphone=(),geolocation=()");
+ reply.header("Cross-Origin-Resource-Policy","cross-origin");
+});
+const allowedOrigins=(process.env.CORS_ALLOWED_ORIGINS||process.env.TELEGRAM_WEBAPP_URL||"").split(",").map(x=>x.trim()).filter(Boolean);
+const builtInOrigins=["https://perezapusk-tgk.github.io"];
+await app.register(cors,{origin:(origin,cb)=>{if(!origin||process.env.NODE_ENV==="production"||allowedOrigins.length===0||allowedOrigins.includes(origin)||builtInOrigins.includes(origin))return cb(null,true);return cb(new Error("Origin not allowed"),false)}});
+function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missing ${key}`);return v}
+const rateBuckets=new Map<string,{count:number;reset:number}>();
+function rateLimit(key:string,limit=60,windowMs=60_000){const now=Date.now();const cur=rateBuckets.get(key);if(!cur||cur.reset<=now){rateBuckets.set(key,{count:1,reset:now+windowMs});return true}if(cur.count>=limit)return false;cur.count++;return true}
+setInterval(()=>{const now=Date.now();for(const [k,v] of rateBuckets)if(v.reset<=now)rateBuckets.delete(k)},60_000).unref();
+setInterval(()=>{expireUnpaidOrders().catch(error=>app.log.error(error,"Failed to expire unpaid orders"))},60_000).unref();
+app.addHook("onRequest",async(req,reply)=>{const key=`${req.ip}:${req.method}:${req.url.split("?")[0]}`;if(!rateLimit(key)){reply.header("Retry-After","60");return reply.code(429).send({error:"Слишком много запросов. Попробуйте позже."})}});
+
+function reliabilityLevel(score:number){if(score<50)return "blocked";if(score<60)return "restricted";if(score<80)return "warning";return "stable"}
+function hashHandover(code:string){return createHash("sha256").update(code).digest("hex")}
+function makeHandoverCode(){return String(randomInt(100000,1000000))}
+function handoverKey(){return createHash("sha256").update(env("TELEGRAM_BOT_TOKEN")).digest()}
+async function expireUnpaidOrders(){
+ await withTransaction(async(c)=>{
+  const expired=(await c.query("select id from orders where status='created' and expires_at is not null and expires_at<=now() for update skip locked")).rows.map((x:any)=>x.id);
+  if(!expired.length)return;
+  await c.query("update inventory i set reserved=greatest(0::integer,i.reserved::integer-oi.quantity::integer),updated_at=now() from order_items oi join seller_orders so on so.id=oi.seller_order_id where so.order_id=any($1::uuid[]) and so.status='created' and oi.product_id=i.product_id",[expired]);
+  await c.query("update seller_orders set status='cancelled' where order_id=any($1::uuid[]) and status='created'",[expired]);
+  await c.query("update payments set status='expired',updated_at=now() where order_id=any($1::uuid[]) and status='pending'",[expired]);
+  await c.query("update orders set status='cancelled',updated_at=now() where id=any($1::uuid[]) and status='created'",[expired]);
+  await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'order_expired','Заказ отменён','Время ожидания оплаты истекло, резерв товара снят.' from orders where id=any($1::uuid[])",[expired]);
+ });
+}
+app.post("/internal/maintenance/expire-orders",async(req,reply)=>{
+ const secret=process.env.MAINTENANCE_CRON_SECRET;
+ if(!secret||req.headers.authorization!==`Bearer ${secret}`)return reply.code(401).send({error:"Unauthorized"});
+ await expireUnpaidOrders();
+ return {ok:true};
+});
+function encryptHandover(code:string){const iv=Buffer.from(randomUUID().replace(/-/g,"").slice(0,24),"hex");const cipher=createCipheriv("aes-256-gcm",handoverKey(),iv);const data=Buffer.concat([cipher.update(code,"utf8"),cipher.final()]);return iv.toString("hex")+":"+cipher.getAuthTag().toString("hex")+":"+data.toString("hex")}
+function decryptHandover(value:string){const [ivHex,tagHex,dataHex]=value.split(":");const decipher=createDecipheriv("aes-256-gcm",handoverKey(),Buffer.from(ivHex,"hex"));decipher.setAuthTag(Buffer.from(tagHex,"hex"));return Buffer.concat([decipher.update(Buffer.from(dataHex,"hex")),decipher.final()]).toString("utf8")}
+async function auth(request:any){
+ const header=request.headers.authorization as string|undefined; const raw=header?.startsWith("tma ")?header.slice(4):"";
+ if(!raw) throw Object.assign(new Error("Unauthorized"),{statusCode:401});
+ const user=validateTelegramInitData(raw,env("TELEGRAM_BOT_TOKEN"),Number(process.env.TELEGRAM_INIT_DATA_MAX_AGE||86400));
+ const r=await pool.query(`insert into users(telegram_id,first_name,last_name,username,language_code,is_premium) values($1,$2,$3,$4,$5,$6) on conflict(telegram_id) do update set first_name=excluded.first_name,last_name=excluded.last_name,username=excluded.username,language_code=excluded.language_code,is_premium=excluded.is_premium,updated_at=now() returning id,telegram_id,first_name,last_name,username,language_code,is_premium,role`,[user.id,user.first_name,user.last_name??null,user.username??null,user.language_code??null,user.is_premium??false]);
+ return r.rows[0];
+}
+app.get("/",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.3.4",health:"/health"}));
+app.get("/health",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.3.4"}));
+async function configureTelegramWebhook(){
+ const token=process.env.TELEGRAM_BOT_TOKEN;
+ const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;
+ const webhookBaseUrl=process.env.TELEGRAM_WEBHOOK_URL;
+ if(!token||!secret||!webhookBaseUrl){app.log.info("Telegram webhook auto-registration skipped: set TELEGRAM_WEBHOOK_URL to the API origin to enable it");return;}
+ const webhookUrl=new URL("/api/payments/telegram/webhook",webhookBaseUrl).toString();
+ const r=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:webhookUrl,secret_token:secret,allowed_updates:["pre_checkout_query","message"],drop_pending_updates:false})});
+ const data=await r.json() as {ok:boolean;description?:string};
+ if(!data.ok){app.log.warn({description:data.description},"Telegram webhook registration failed");return;}
+ const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть Nookly"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь"},{command:"terms",description:"Условия покупки"},{command:"support",description:"Поддержка"}]})});
+ const commandsData=await commands.json() as {ok:boolean;description?:string};
+ if(!commandsData.ok)app.log.warn({description:commandsData.description},"Telegram commands registration failed");
+ const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
+ if(webAppUrl){
+   const menu=await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({menu_button:{type:"web_app",text:"🛍 Nookly",web_app:{url:webAppUrl}}})});
+   const menuData=await menu.json() as {ok:boolean;description?:string};
+   if(!menuData.ok)app.log.warn({description:menuData.description},"Telegram menu button registration failed");
+ }
+ app.log.info({webhookUrl,webAppUrl},"Telegram webhook and Mini App menu configured");
+}
+
+app.get("/api/me",async(req)=>({user:await auth(req)}));
+app.post("/api/auth/telegram",async(req)=>({user:await auth(req)}));
+app.get("/api/categories",async()=>({items:(await pool.query("select id,name,slug,parent_id,restricted,age_restriction from categories order by name")).rows}));
+app.get("/api/catalog",async(req)=>{
+ const q=z.object({search:z.string().trim().max(100).optional(),categoryId:z.string().uuid().optional(),limit:z.coerce.number().int().min(1).max(50).default(20),offset:z.coerce.number().int().min(0).default(0)}).parse(req.query);
+ const values:any[]=[];const where:string[]=[`p.status='published'`];
+ if(q.search){values.push(`%${q.search}%`);where.push(`(p.title ilike $${values.length} or coalesce(p.description,'') ilike $${values.length})`)}
++limitParam+` offset import Fastify from "fastify";
+import cors from "@fastify/cors";
+import { z } from "zod";
+import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv } from "node:crypto";
+import { pool, withTransaction } from "./db.js";
+import { validateTelegramInitData } from "./telegram.js";
+import { answerPreCheckout, createTelegramInvoiceLink } from "./telegram-payments.js";
+async function telegramSendMessage(chatId:number|string,text:string,replyMarkup?:Record<string,unknown>){
+ const token=process.env.TELEGRAM_BOT_TOKEN;
+ if(!token)return;
+ const body:Record<string,unknown>={chat_id:chatId,text,disable_web_page_preview:true};
+ if(replyMarkup)body.reply_markup=replyMarkup;
+ await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+}
+
+import { runMigrations } from "./migrate.js";
+export const app=Fastify({logger:true});
+app.setErrorHandler((error,req,reply)=>{
+  req.log.error({err:error},"Unhandled API error");
+  const err:any=error;
+  const status=Number(err.statusCode)||500;
+  const safe=status>=500 ? (err.message||"Internal server error") : err.message;
+  reply.code(status).send({error:safe});
+});
+app.addHook("onSend",async(_req,reply)=>{
+ reply.header("X-Content-Type-Options","nosniff");
+ reply.header("X-Frame-Options","DENY");
+ reply.header("Referrer-Policy","no-referrer");
+ reply.header("Permissions-Policy","camera=(),microphone=(),geolocation=()");
+ reply.header("Cross-Origin-Resource-Policy","cross-origin");
+});
+const allowedOrigins=(process.env.CORS_ALLOWED_ORIGINS||process.env.TELEGRAM_WEBAPP_URL||"").split(",").map(x=>x.trim()).filter(Boolean);
+const builtInOrigins=["https://perezapusk-tgk.github.io"];
+await app.register(cors,{origin:(origin,cb)=>{if(!origin||process.env.NODE_ENV==="production"||allowedOrigins.length===0||allowedOrigins.includes(origin)||builtInOrigins.includes(origin))return cb(null,true);return cb(new Error("Origin not allowed"),false)}});
+function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missing ${key}`);return v}
+const rateBuckets=new Map<string,{count:number;reset:number}>();
+function rateLimit(key:string,limit=60,windowMs=60_000){const now=Date.now();const cur=rateBuckets.get(key);if(!cur||cur.reset<=now){rateBuckets.set(key,{count:1,reset:now+windowMs});return true}if(cur.count>=limit)return false;cur.count++;return true}
+setInterval(()=>{const now=Date.now();for(const [k,v] of rateBuckets)if(v.reset<=now)rateBuckets.delete(k)},60_000).unref();
+setInterval(()=>{expireUnpaidOrders().catch(error=>app.log.error(error,"Failed to expire unpaid orders"))},60_000).unref();
+app.addHook("onRequest",async(req,reply)=>{const key=`${req.ip}:${req.method}:${req.url.split("?")[0]}`;if(!rateLimit(key)){reply.header("Retry-After","60");return reply.code(429).send({error:"Слишком много запросов. Попробуйте позже."})}});
+
+function reliabilityLevel(score:number){if(score<50)return "blocked";if(score<60)return "restricted";if(score<80)return "warning";return "stable"}
+function hashHandover(code:string){return createHash("sha256").update(code).digest("hex")}
+function makeHandoverCode(){return String(randomInt(100000,1000000))}
+function handoverKey(){return createHash("sha256").update(env("TELEGRAM_BOT_TOKEN")).digest()}
+async function expireUnpaidOrders(){
+ await withTransaction(async(c)=>{
+  const expired=(await c.query("select id from orders where status='created' and expires_at is not null and expires_at<=now() for update skip locked")).rows.map((x:any)=>x.id);
+  if(!expired.length)return;
+  await c.query("update inventory i set reserved=greatest(0::integer,i.reserved::integer-oi.quantity::integer),updated_at=now() from order_items oi join seller_orders so on so.id=oi.seller_order_id where so.order_id=any($1::uuid[]) and so.status='created' and oi.product_id=i.product_id",[expired]);
+  await c.query("update seller_orders set status='cancelled' where order_id=any($1::uuid[]) and status='created'",[expired]);
+  await c.query("update payments set status='expired',updated_at=now() where order_id=any($1::uuid[]) and status='pending'",[expired]);
+  await c.query("update orders set status='cancelled',updated_at=now() where id=any($1::uuid[]) and status='created'",[expired]);
+  await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'order_expired','Заказ отменён','Время ожидания оплаты истекло, резерв товара снят.' from orders where id=any($1::uuid[])",[expired]);
+ });
+}
+app.post("/internal/maintenance/expire-orders",async(req,reply)=>{
+ const secret=process.env.MAINTENANCE_CRON_SECRET;
+ if(!secret||req.headers.authorization!==`Bearer ${secret}`)return reply.code(401).send({error:"Unauthorized"});
+ await expireUnpaidOrders();
+ return {ok:true};
+});
+function encryptHandover(code:string){const iv=Buffer.from(randomUUID().replace(/-/g,"").slice(0,24),"hex");const cipher=createCipheriv("aes-256-gcm",handoverKey(),iv);const data=Buffer.concat([cipher.update(code,"utf8"),cipher.final()]);return iv.toString("hex")+":"+cipher.getAuthTag().toString("hex")+":"+data.toString("hex")}
+function decryptHandover(value:string){const [ivHex,tagHex,dataHex]=value.split(":");const decipher=createDecipheriv("aes-256-gcm",handoverKey(),Buffer.from(ivHex,"hex"));decipher.setAuthTag(Buffer.from(tagHex,"hex"));return Buffer.concat([decipher.update(Buffer.from(dataHex,"hex")),decipher.final()]).toString("utf8")}
+async function auth(request:any){
+ const header=request.headers.authorization as string|undefined; const raw=header?.startsWith("tma ")?header.slice(4):"";
+ if(!raw) throw Object.assign(new Error("Unauthorized"),{statusCode:401});
+ const user=validateTelegramInitData(raw,env("TELEGRAM_BOT_TOKEN"),Number(process.env.TELEGRAM_INIT_DATA_MAX_AGE||86400));
+ const r=await pool.query(`insert into users(telegram_id,first_name,last_name,username,language_code,is_premium) values($1,$2,$3,$4,$5,$6) on conflict(telegram_id) do update set first_name=excluded.first_name,last_name=excluded.last_name,username=excluded.username,language_code=excluded.language_code,is_premium=excluded.is_premium,updated_at=now() returning id,telegram_id,first_name,last_name,username,language_code,is_premium,role`,[user.id,user.first_name,user.last_name??null,user.username??null,user.language_code??null,user.is_premium??false]);
+ return r.rows[0];
+}
+app.get("/",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.3.4",health:"/health"}));
+app.get("/health",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.3.4"}));
+async function configureTelegramWebhook(){
+ const token=process.env.TELEGRAM_BOT_TOKEN;
+ const secret=process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;
+ const webhookBaseUrl=process.env.TELEGRAM_WEBHOOK_URL;
+ if(!token||!secret||!webhookBaseUrl){app.log.info("Telegram webhook auto-registration skipped: set TELEGRAM_WEBHOOK_URL to the API origin to enable it");return;}
+ const webhookUrl=new URL("/api/payments/telegram/webhook",webhookBaseUrl).toString();
+ const r=await fetch(`https://api.telegram.org/bot${token}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:webhookUrl,secret_token:secret,allowed_updates:["pre_checkout_query","message"],drop_pending_updates:false})});
+ const data=await r.json() as {ok:boolean;description?:string};
+ if(!data.ok){app.log.warn({description:data.description},"Telegram webhook registration failed");return;}
+ const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть Nookly"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь"},{command:"terms",description:"Условия покупки"},{command:"support",description:"Поддержка"}]})});
+ const commandsData=await commands.json() as {ok:boolean;description?:string};
+ if(!commandsData.ok)app.log.warn({description:commandsData.description},"Telegram commands registration failed");
+ const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
+ if(webAppUrl){
+   const menu=await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({menu_button:{type:"web_app",text:"🛍 Nookly",web_app:{url:webAppUrl}}})});
+   const menuData=await menu.json() as {ok:boolean;description?:string};
+   if(!menuData.ok)app.log.warn({description:menuData.description},"Telegram menu button registration failed");
+ }
+ app.log.info({webhookUrl,webAppUrl},"Telegram webhook and Mini App menu configured");
+}
+
+app.get("/api/me",async(req)=>({user:await auth(req)}));
+app.post("/api/auth/telegram",async(req)=>({user:await auth(req)}));
+app.get("/api/categories",async()=>({items:(await pool.query("select id,name,slug,parent_id,restricted,age_restriction from categories order by name")).rows}));
+app.get("/api/catalog",async(req)=>{
+ const q=z.object({search:z.string().trim().max(100).optional(),categoryId:z.string().uuid().optional(),limit:z.coerce.number().int().min(1).max(50).default(20),offset:z.coerce.number().int().min(0).default(0)}).parse(req.query);
+ const values:any[]=[];const where:string[]=[`p.status='published'`];
+ if(q.search){values.push(`%${q.search}%`);where.push(`(p.title ilike $${values.length} or coalesce(p.description,'') ilike $${values.length})`)}
++offsetParam;
+ const r=await pool.query(sql,values);
  return {items:r.rows,nextCursor:r.rows.length===q.limit?q.offset+q.limit:null};
 });
 app.get("/api/products/:id",async(req,reply)=>{
