@@ -385,7 +385,28 @@ function SellerPanel({products,loadSeller,setMessage,back,categories}:{products:
  async function confirmOrder(id:string){const r=await fetch(api()+"/api/seller-orders/"+id+"/confirm",{method:"POST",headers:{Authorization:"tma "+init()}});if(!r.ok){setMessage((await r.json()).error||"Не удалось подтвердить заказ");return}await loadFinance();setMessage("Заказ подтверждён. Теперь отметьте его готовым к получению.");}
  async function rejectOrder(id:string){const r=await fetch(api()+"/api/seller-orders/"+id+"/reject",{method:"POST",headers:{Authorization:"tma "+init()}});if(!r.ok){setMessage((await r.json()).error||"Не удалось отменить заказ");return}await loadFinance();setMessage("Заказ отменён. Надёжность продавца пересчитана.");}
  async function readyOrder(id:string){const r=await fetch(api()+"/api/seller-orders/"+id+"/ready",{method:"POST",headers:{Authorization:"tma "+init()}});if(!r.ok){setMessage((await r.json()).error||"Не удалось отметить готовность");return}await loadFinance();setMessage("Заказ готов. Покупателю показан код получения.");}
- async function completeOrder(id:string){const code=window.prompt("Введите 6-значный код, который показал покупатель:")?.trim()||"";if(!code){setMessage("Выдача отменена.");return}if(!/^\d{6}$/.test(code)){setMessage("Код должен состоять из 6 цифр.");return}const r=await fetch(api()+"/api/seller-orders/"+id+"/complete",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init()},body:JSON.stringify({code})});if(!r.ok){setMessage((await r.json()).error||"Неверный код");return}await loadFinance();setMessage("Получение подтверждено. Средства доступны для вывода.");}
+ async function completeOrder(id:string){
+ setHandoverTarget(sellerOrders.find(o=>o.id===id)||{id});
+ setHandoverCode("");
+ setActionBusy(false);
+}
+async function submitHandover(){
+ if(!handoverTarget||actionBusy)return;
+ const code=handoverCode.trim();
+ if(!/^\d{6}$/.test(code)){setMessage("Код должен состоять из 6 цифр.");return}
+ setActionBusy(true);
+ try{
+  const r=await fetch(api()+"/api/seller-orders/"+handoverTarget.id+"/complete",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init()},body:JSON.stringify({code})});
+  let body:any=null;try{body=await r.json()}catch{}
+  if(!r.ok){setMessage(body?.error||("Не удалось подтвердить выдачу ("+r.status+")"));return}
+  setHandoverTarget(null);
+  setHandoverCode("");
+  await loadFinance();
+  setMessage("Получение подтверждено. Средства доступны для вывода.");
+ }catch(e){
+  setMessage(e instanceof Error?e.message:"Не удалось подтвердить выдачу");
+ }finally{setActionBusy(false)}
+}
  async function searchImages(){
   const query=(imageQuery||title).trim();if(query.length<2)return;
   setImageSearching(true);
@@ -416,11 +437,22 @@ async function create(){
  }catch(e){setMessage(e instanceof Error?e.message:"Ошибка")}finally{setSaving(false)}
 }
 async function deleteProduct(p:any){
- if(!window.confirm("Удалить «"+p.title+"»? Товар исчезнет из каталога."))return;
- const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
- const r=await fetch(api()+"/api/seller/products/"+p.id,{method:"DELETE",headers:{Authorization:"tma "+init}});
- if(!r.ok){setMessage((await r.json()).error||"Не удалось удалить товар");return}
- const d=await r.json();loadSeller();setMessage(d.mode==="archived"?"Товар скрыт из каталога, история заказов сохранена.":"Товар удалён.");
+ setDeleteTarget(p);
+}
+async function submitDelete(){
+ if(!deleteTarget||actionBusy)return;
+ setActionBusy(true);
+ try{
+  const r=await fetch(api()+"/api/seller/products/"+deleteTarget.id,{method:"DELETE",headers:{Authorization:"tma "+init()}});
+  let body:any=null;try{body=await r.json()}catch{}
+  if(!r.ok){setMessage(body?.error||("Не удалось удалить товар ("+r.status+")"));return}
+  const title=deleteTarget.title;
+  setDeleteTarget(null);
+  await loadSeller();
+  setMessage(body?.mode==="archived"?"Товар «"+title+"» скрыт из каталога, история заказов сохранена.":"Товар «"+title+"» удалён.");
+ }catch(e){
+  setMessage(e instanceof Error?e.message:"Не удалось удалить товар");
+ }finally{setActionBusy(false)}
 }
  const activeOrders=sellerOrders.filter(o=>["paid","seller_confirmed","ready_for_handover"].includes(o.status));
  const lowStock=products.filter(p=>Number(p.stock??p.available_stock??0)>0&&Number(p.stock??p.available_stock??0)<=2);
