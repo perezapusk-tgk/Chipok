@@ -31,7 +31,7 @@ app.addHook("onSend",async(_req,reply)=>{
 });
 const allowedOrigins=(process.env.CORS_ALLOWED_ORIGINS||process.env.TELEGRAM_WEBAPP_URL||"").split(",").map(x=>x.trim()).filter(Boolean);
 const builtInOrigins=["https://perezapusk-tgk.github.io"];
-await app.register(cors,{origin:(origin,cb)=>{if(!origin||process.env.NODE_ENV==="production"||allowedOrigins.length===0||allowedOrigins.includes(origin)||builtInOrigins.includes(origin))return cb(null,true);return cb(new Error("Origin not allowed"),false)}});
+await app.register(cors,{origin:(origin,cb)=>{if(!origin||allowedOrigins.length===0||allowedOrigins.includes(origin)||builtInOrigins.includes(origin))return cb(null,true);return cb(new Error("Origin not allowed"),false)}});
 function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missing ${key}`);return v}
 const rateBuckets=new Map<string,{count:number;reset:number}>();
 function rateLimit(key:string,limit=60,windowMs=60_000){const now=Date.now();const cur=rateBuckets.get(key);if(!cur||cur.reset<=now){rateBuckets.set(key,{count:1,reset:now+windowMs});return true}if(cur.count>=limit)return false;cur.count++;return true}
@@ -135,6 +135,7 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
   for(const item of body.items){
    const p=(await c.query(`select p.id,p.seller_id,p.title,p.price_minor,p.currency,p.fulfillment_type,i.stock,i.reserved,u.role from products p join inventory i on i.product_id=p.id join users u on u.id=p.seller_id where p.id=$1 and p.status='published' for update of p,i,u`,[item.productId])).rows[0];
    if(!p)throw Object.assign(new Error("Product unavailable"),{statusCode:409});
+   if(String(p.seller_id)===String(buyer.id))throw Object.assign(new Error("Нельзя купить собственный товар"),{statusCode:409});
    const sellerProfile=(await c.query("select reliability_score from seller_profiles where user_id=$1",[p.seller_id])).rows[0];
    const sellerReliability=Number(sellerProfile?.reliability_score ?? 0);
    if(p.role!=="seller" || sellerReliability<60)throw Object.assign(new Error("Seller is temporarily unavailable for new orders"),{statusCode:409});
