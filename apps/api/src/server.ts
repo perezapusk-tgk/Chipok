@@ -391,6 +391,51 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
  if(!result)return reply.code(404).send({error:"Dispute not found"});
  return result;
 });
+app.get("/api/admin/refunds",async(req,reply)=>{
+ const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
+ const r=await pool.query(`select r.id,r.order_id,r.payment_id,r.amount_minor,r.currency,r.status,r.provider_refund_id,r.reason,r.created_at,r.updated_at,r.completed_at,u.first_name as buyer_name from refunds r join orders o on o.id=r.order_id join users u on u.id=o.buyer_id order by r.created_at desc limit 100`);
+ return {items:r.rows};
+});
+app.post("/api/admin/refunds/:id/resolve",async(req,reply)=>{
+ const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
+ const id=z.string().uuid().parse((req.params as any).id);
+ const body=z.object({status:z.enum(["completed","failed"]),providerRefundId:z.string().trim().max(200).optional(),note:z.string().trim().max(1000).optional()}).parse(req.body);
+ const result=await withTransaction(async(c)=>{
+  const refund=(await c.query("select * from refunds where id=$1 for update",[id])).rows[0];
+  if(!refund)return null;
+  if(refund.status==="completed"||refund.status==="failed")throw Object.assign(new Error("Refund already resolved"),{statusCode:409});
+  const order=(await c.query("select id,buyer_id,status from orders where id=$1 for update",[refund.order_id])).rows[0];
+  if(!order)throw Object.assign(new Error("Order not found"),{statusCode:404});
+  if(body.status==="completed"){
+   await c.query("update refunds set status='completed',provider_refund_id=coalesce($1,provider_refund_id),completed_at=now(),updated_at=now() where id=$2",[body.providerRefundId||null,id]);
+   await c.query("update payments set status='refunded',updated_at=now() where id=$1",[refund.payment_id]);
+   await c.query("update orders set status='refunded',updated_at=now() where id=$1",[refund.order_id]);
+   await c.query("insert into notifications(user_id,type,title,body) values($1,'refund_completed','Возврат выполнен','Средства по заказу возвращены покупателю платёжным провайдером.')",[order.buyer_id]);
+  }else{
+   await c.query("update refunds set status='failed',provider_refund_id=coalesce($1,provider_refund_id),updated_at=now() where id=$2",[body.providerRefundId||null,id]);
+   await c.query("update payments set status='paid',updated_at=now() where id=$1",[refund.payment_id]);
+   await c.query("update orders set status='disputed',updated_at=now() where id=$1",[refund.order_id]);
+   const sellerRows=await c.query("select seller_id,seller_amount_minor from seller_orders where order_id=$1",[refund.order_id]);
+   for(const so of sellerRows.rows){
+    const desc="Восстановление средств после неуспешного возврата "+refund.id;
+    const exists=await c.query("select 1 from ledger_entries where order_id=$1 and seller_id=$2 and type='adjustment' and description=$3",[refund.order_id,so.seller_id,desc]);
+    if(!exists.rowCount)await c.query("insert into ledger_entries(seller_id,order_id,type,amount_minor,currency,description) values($1,$2,'adjustment',$3,$4,$5)",[so.seller_id,refund.order_id,Number(so.seller_amount_minor),refund.currency,desc]);
+   }
+   const pfee=await c.query("select amount_minor,currency from platform_ledger_entries where order_id=$1 and type='refund' limit 1",[refund.order_id]);
+   if(pfee.rowCount){
+    const desc="Восстановление комиссии после неуспешного возврата "+refund.id;
+    const exists=await c.query("select 1 from platform_ledger_entries where order_id=$1 and type='adjustment' and description=$2",[refund.order_id,desc]);
+    if(!exists.rowCount)await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'adjustment',$2,$3,$4)",[refund.order_id,Number(pfee.rows[0].amount_minor),pfee.rows[0].currency,desc]);
+   }
+   await c.query("insert into notifications(user_id,type,title,body) values($1,'refund_failed','Возврат не выполнен','Платёжный провайдер не подтвердил возврат. Заказ передан на повторную обработку.')",[order.buyer_id]);
+  }
+  await c.query("insert into admin_actions(admin_id,action,target_type,target_id,metadata) values($1,'resolve_refund','refund',$2,$3)",[admin.id,refund.id,JSON.stringify({status:body.status,providerRefundId:body.providerRefundId||null,note:body.note||null})]);
+  return {id:refund.id,status:body.status};
+ });
+ if(!result)return reply.code(404).send({error:"Refund not found"});
+ return result;
+});
+
 app.get("/api/admin/payouts",async(req,reply)=>{const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});const r=await pool.query("select p.id,p.seller_id,p.amount_minor,p.currency,p.status,p.provider_payout_id,p.created_at,p.completed_at,u.first_name as seller_name,u.username from payouts p join users u on u.id=p.seller_id order by p.created_at desc limit 100");return {items:r.rows};});
 app.post("/api/admin/payouts/:id/resolve",async(req,reply)=>{const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});const id=z.string().uuid().parse((req.params as any).id);const body=z.object({status:z.enum(["completed","failed"]),providerPayoutId:z.string().trim().max(200).optional(),note:z.string().trim().max(1000).optional()}).parse(req.body);const result=await withTransaction(async(c)=>{const p=(await c.query("select * from payouts where id=$1 for update",[id])).rows[0];if(!p)return null;if(p.status==="completed"||p.status==="failed")throw Object.assign(new Error("Payout already resolved"),{statusCode:409});if(body.status==="failed"){const description="Возврат неуспешного вывода "+p.id;const exists=await c.query("select 1 from ledger_entries where seller_id=$1 and type='adjustment' and description=$2 limit 1",[p.seller_id,description]);if(!exists.rowCount)await c.query("insert into ledger_entries(seller_id,type,amount_minor,currency,description) values($1,'adjustment',$2,$3,$4)",[p.seller_id,Number(p.amount_minor),p.currency,description]);}await c.query("update payouts set status=$1,provider_payout_id=coalesce($2,provider_payout_id),completed_at=case when $1='completed' then now() else completed_at end,updated_at=now() where id=$3",[body.status,body.providerPayoutId||null,id]);await c.query("insert into admin_actions(admin_id,action,target_type,target_id,metadata) values($1,'resolve_payout','payout',$2,$3)",[admin.id,id,JSON.stringify({status:body.status,note:body.note||null})]);await c.query("insert into notifications(user_id,type,title,body) values($1,'payout_update',$2,$3)",[p.seller_id,body.status==="completed"?"Вывод выполнен":"Вывод отклонён",body.status==="completed"?"Средства отправлены.":"Средства возвращены на баланс из-за неуспешного вывода."]);return {id,status:body.status};});if(!result)return reply.code(404).send({error:"Payout not found"});return result;});
 app.get("/api/admin/moderation",async(req,reply)=>{const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});const r=await pool.query(`select m.id,m.status,m.reason,m.created_at,p.id as product_id,p.title,p.price_minor,p.currency,u.first_name as seller_name from moderation_queue m join products p on p.id=m.product_id join users u on u.id=p.seller_id where m.status='pending' order by m.created_at asc`);return {items:r.rows};});
