@@ -5,7 +5,6 @@ import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv } f
 import { pool, withTransaction } from "./db.js";
 import { validateTelegramInitData } from "./telegram.js";
 import { OrderService } from "./services/order-service.js";
-import { TransactionService } from "./services/transaction-service.js";
 async function telegramSendMessage(chatId:number|string,text:string,replyMarkup?:Record<string,unknown>){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  if(!token)return;
