@@ -101,54 +101,21 @@ export default function Home(){
  const toggleFavorite=async(p:Product)=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init){setMessage("Открой Nookly внутри Telegram.");return}const isFav=favoriteIds.has(p.id);const r=await fetch(api()+"/api/favorites/"+p.id,{method:isFav?"DELETE":"POST",headers:{Authorization:"tma "+init}});if(!r.ok){setMessage("Не удалось изменить избранное");return}setFavoriteIds(prev=>{const n=new Set(prev);if(isFav)n.delete(p.id);else n.add(p.id);return n});setMessage(isFav?"Удалено из избранного":"Товар добавлен в избранное.");};
  const checkout=async()=>{
    if(!cart.length)return;
-   if(!tg?.initData){setMessage("Открой Nookly внутри Telegram для оплаты.");return}
+   if(!tg?.initData){setMessage("Открой Nookly внутри Telegram.");return}
    setLoading(true);setMessage("");
    try{
     const grouped=Object.values(cart.reduce((a,p)=>{a[p.id]=(a[p.id]||{productId:p.id,quantity:0});a[p.id].quantity++;return a},{} as Record<string,{productId:string;quantity:number}>));
     const r=await fetch(api()+"/api/orders",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({items:grouped})});
     if(!r.ok)throw new Error((await r.json()).error||"Не удалось создать заказ");
-    const data=await r.json();
-    const pr=await fetch(api()+"/api/orders/"+data.order.id+"/payment",{method:"POST",headers:authHeaders()});
-    if(!pr.ok){
-      let body:any=null; try{body=await pr.json()}catch{}
-      throw new Error(body?.error||("Ошибка оплаты ("+pr.status+")"));
-    }
-    const payment=await pr.json();
-    if(!payment.invoiceLink||typeof tg.openInvoice!=="function")throw new Error("Telegram payment window is unavailable");
-    const orderId=String(data.order.id);
-    setMessage("Открываем оплату в Telegram…");
-    tg.openInvoice(payment.invoiceLink,(status)=>{
-      if(status==="paid"){
-        setMessage("Telegram сообщил об оплате. Проверяем подтверждение на сервере…");loadOrders();
-      }else if(status==="cancelled"){
-        setMessage("Оплата отменена. Заказ сохранён на 30 минут — можно открыть оплату снова.");
-      }else if(status==="failed"){
-        setMessage("Оплата не прошла. Попробуй ещё раз из заказа.");
-      }else{
-        setMessage("Ожидаем подтверждение оплаты…");
-      }
-    });
-    const started=Date.now();
-    const poll=async()=>{
-      while(Date.now()-started<30000){
-        await new Promise(resolve=>setTimeout(resolve,2000));
-        const rr=await fetch(api()+"/api/orders",{headers:authHeaders()});
-        if(!rr.ok)continue;
-        const list=(await rr.json()).items||[];
-        const current=list.find((o:any)=>o.id===orderId);
-        if(current?.status&&current.status!=="created"){
-          setOrders(list);
-          if(["paid","seller_confirmed","ready_for_handover","completed"].includes(current.status)){
-            setCart([]);setTab("orders");setMessage("Оплата подтверждена сервером. Заказ передан продавцу.");
-          }else if(["cancelled","refunded","disputed","refund_pending"].includes(current.status)){
-            setTab("orders");setMessage("Заказ получил статус: "+statusRu(current.status)+". Открой его в разделе «Заказы».");loadOrders();
-          }
-          return;
-        }
-      }
-    };
-    void poll();
-   }catch(e){setMessage(e instanceof Error?e.message:"Ошибка оплаты")}finally{setLoading(false)}
+    setCart([]);
+    setTab("orders");
+    await loadOrders();
+    setMessage("Заказ создан. Продавец подтвердит наличие. Денежные расчёты на текущем этапе обрабатываются вручную.");
+   }catch(e){
+    setMessage(e instanceof Error?e.message:"Не удалось создать заказ");
+   }finally{
+    setLoading(false);
+   }
  };
  if(selected)return <div className="app"><main className="shell detail"><button className="icon-btn back" onClick={()=>setSelected(null)}>←</button><div className="detail-image"><img src={selected.image||selected.image_url||logo()} alt={selected.title} onError={e=>{e.currentTarget.src=logo()}}/></div><h1>{selected.title}</h1><div className="rating"><b>★ {selected.rating||"—"}</b> {selected.reviews?"("+selected.reviews+" отзыва)":""}</div><div className="seller">♙ {selected.seller||"Продавец Nookly"}</div><div className="price">{money(selected.price_minor??Math.round((selected.price||0)*100),selected.currency)}</div><div className="meta"><div>Наличие<b>{Number(selected.available_stock??0)>0?"В наличии":"Нет"}</b></div><div>Формат<b>{selected.fulfillment_type==="meeting"?"Встреча":"Самовывоз"}</b></div><div>Комиссия<b>5% с продавца</b></div></div><p className="desc">{selected.description||"Товар из каталога Nookly. Место и время получения покупатель согласовывает с продавцом в чате."}</p><div className="row" style={{gap:8}}>{selected.seller_id&&<button className="secondary wide" onClick={async()=>{const r=await fetch(api()+"/api/chat/threads",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({sellerId:selected.seller_id,productId:selected.id})});if(r.ok){setMessage("Чат с продавцом открыт. Перейди во вкладку «Чаты».");setTab("chat")}else setMessage("Не удалось открыть чат с продавцом")}}>Написать продавцу</button>}<button className="primary wide sticky-buy" disabled={Number(selected.available_stock??0)<=0} onClick={()=>{if(Number(selected.available_stock??0)>0){add(selected);setSelected(null)}}}>{Number(selected.available_stock??0)>0?"Добавить в корзину":"Нет в наличии"}</button></div></main></div>;
 
@@ -251,33 +218,15 @@ function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}) {
  }
 
 
- async function payOrder(orderId:string){
-   setBusy(true); setLocalMessage("");
-   try{
-     const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
-     if(!init){setLocalMessage("Открой Nookly внутри Telegram для оплаты.");return}
-     const r=await fetch(api()+"/api/orders/"+orderId+"/payment",{method:"POST",headers:{Authorization:"tma "+init}});
-     const d=await r.json();
-     if(!r.ok)throw new Error(d.error||"Не удалось открыть оплату");
-     const tg=typeof window!=="undefined"?window.Telegram?.WebApp:undefined;
-     if(!d.invoiceLink||typeof tg?.openInvoice!=="function")throw new Error("Окно оплаты Telegram недоступно");
-     tg.openInvoice(d.invoiceLink,(status)=>{
-       if(status==="paid"){setLocalMessage("Оплата получена. Проверяем заказ…");onLoad()}
-       else if(status==="cancelled")setLocalMessage("Оплата отменена. Заказ можно оплатить позже.");
-       else if(status==="failed")setLocalMessage("Оплата не прошла. Попробуйте ещё раз.");
-     });
-   }catch(e){setLocalMessage(e instanceof Error?e.message:"Ошибка оплаты")}
-   finally{setBusy(false)}
- }
  if(active) return <div className="hero">
    {localMessage&&<p className="small">{localMessage}</p>}
    <button className="icon-btn" onClick={()=>setActive(null)}>←</button>
    <h1>Заказ #{active.id.slice(0,8)}</h1>
    <div className={"order-status status-"+active.status}>{statusRu(active.status)}</div>
    <div className="order-total">{money(Number(active.total_minor),active.currency)}</div>
-   <div className="order-progress"><span className={["paid","seller_confirmed","ready_for_handover","completed"].includes(active.status)?"done":""}>Оплата</span><span className={["seller_confirmed","ready_for_handover","completed"].includes(active.status)?"done":""}>Подтверждение</span><span className={["ready_for_handover","completed"].includes(active.status)?"done":""}>Получение</span><span className={active.status==="completed"?"done":""}>Завершено</span></div>
+   <div className="order-progress"><span className={["created","seller_confirmed","ready_for_handover","completed"].includes(active.status)?"done":""}>Заказ</span><span className={["seller_confirmed","ready_for_handover","completed"].includes(active.status)?"done":""}>Подтверждение</span><span className={["ready_for_handover","completed"].includes(active.status)?"done":""}>Получение</span><span className={active.status==="completed"?"done":""}>Завершено</span></div>
    <div className="small">{new Date(active.created_at).toLocaleString("ru-RU")}</div>
-   {active.status==="created"&&<button className="primary wide" disabled={busy} onClick={()=>payOrder(active.id)}>{busy?"Открываем оплату…":"Оплатить заказ"}</button>}
+   {active.status==="created"&&<div className="small">Продавец ещё не подтвердил наличие. После подтверждения можно согласовать оплату и получение напрямую.</div>}
 
    <div className="menu order-sellers">
      {(active.seller_orders||[]).map((so:any)=><div className="order-seller" key={so.id}>
