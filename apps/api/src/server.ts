@@ -53,6 +53,43 @@ function buildPaymentOrderUrl(orderId:string,amountMinor:number){
    .replaceAll("{amount}",encodeURIComponent((amountMinor/100).toFixed(2)))
    .replaceAll("{currency}","USDT");
 }
+function cryptoPayToken(){return process.env.CRYPTO_PAY_API_TOKEN?.trim()||""}
+function cryptoPaySignatureValid(rawBody:string,signature:string){
+ const token=cryptoPayToken(); if(!token||!signature)return false;
+ const secret=createHash("sha256").update(token).digest();
+ const expected=createHash("sha256").update(Buffer.from(rawBody)).digest("hex");
+ const mac=requireHmacSha256(secret,rawBody);
+ return timingSafeHexEqual(mac,signature);
+}
+function requireHmacSha256(secret:Buffer,value:string){
+ const {createHmac}=require("node:crypto") as typeof import("node:crypto");
+ return createHmac("sha256",secret).update(value).digest("hex");
+}
+function timingSafeHexEqual(a:string,b:string){
+ if(a.length!==b.length)return false;
+ const aa=Buffer.from(a,"hex"),bb=Buffer.from(b,"hex");
+ return aa.length===bb.length && require("node:crypto").timingSafeEqual(aa,bb);
+}
+async function cryptoPay(method:string,body:Record<string,unknown>){
+ const token=cryptoPayToken(); if(!token)throw Object.assign(new Error("Crypto Pay is not configured"),{statusCode:503});
+ const r=await fetch(`https://pay.crypt.bot/api/${method}`,{method:"POST",headers:{"Crypto-Pay-API-Token":token,"Content-Type":"application/json"},body:JSON.stringify(body)});
+ const data=await r.json() as any;
+ if(!r.ok||!data.ok)throw Object.assign(new Error(data?.error?.name||data?.error||"Crypto Pay request failed"),{statusCode:502});
+ return data.result;
+}
+async function createCryptoPayInvoice(orderId:string,amountMinor:number){
+ const amount=(amountMinor/100).toFixed(2);
+ const invoice=await cryptoPay("createInvoice",{
+   asset:"USDT",
+   amount,
+   description:`Nookly order ${orderId}`,
+   payload:orderId,
+   allow_comments:false,
+   allow_anonymous:false,
+   expires_in:1800
+ });
+ return {invoiceId:String(invoice.invoice_id),paymentUrl:String(invoice.bot_invoice_url||invoice.mini_app_invoice_url||invoice.web_app_invoice_url||""),providerPayload:invoice};
+}
 const rateBuckets=new Map<string,{count:number;reset:number}>();
 function rateLimit(key:string,limit=60,windowMs=60_000){const now=Date.now();const cur=rateBuckets.get(key);if(!cur||cur.reset<=now){rateBuckets.set(key,{count:1,reset:now+windowMs});return true}if(cur.count>=limit)return false;cur.count++;return true}
 setInterval(()=>{const now=Date.now();for(const [k,v] of rateBuckets)if(v.reset<=now)rateBuckets.delete(k)},60_000).unref();
