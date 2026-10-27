@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { z } from "zod";
-import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv } from "node:crypto";
+import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv, createHmac, timingSafeEqual } from "node:crypto";
 import { pool, withTransaction } from "./db.js";
 import { validateTelegramInitData } from "./telegram.js";
 import { OrderService } from "./services/order-service.js";
@@ -56,19 +56,10 @@ function buildPaymentOrderUrl(orderId:string,amountMinor:number){
 function cryptoPayToken(){return process.env.CRYPTO_PAY_API_TOKEN?.trim()||""}
 function cryptoPaySignatureValid(rawBody:string,signature:string){
  const token=cryptoPayToken(); if(!token||!signature)return false;
- const secret=createHash("sha256").update(token).digest();
- const expected=createHash("sha256").update(Buffer.from(rawBody)).digest("hex");
- const mac=requireHmacSha256(secret,rawBody);
- return timingSafeHexEqual(mac,signature);
-}
-function requireHmacSha256(secret:Buffer,value:string){
- const {createHmac}=require("node:crypto") as typeof import("node:crypto");
- return createHmac("sha256",secret).update(value).digest("hex");
-}
-function timingSafeHexEqual(a:string,b:string){
- if(a.length!==b.length)return false;
- const aa=Buffer.from(a,"hex"),bb=Buffer.from(b,"hex");
- return aa.length===bb.length && require("node:crypto").timingSafeEqual(aa,bb);
+ const secret=createHmac("sha256","WebAppData").update(token).digest();
+ const mac=createHmac("sha256",secret).update(rawBody).digest("hex");
+ if(mac.length!==signature.length)return false;
+ return timingSafeEqual(Buffer.from(mac,"hex"),Buffer.from(signature,"hex"));
 }
 async function cryptoPay(method:string,body:Record<string,unknown>){
  const token=cryptoPayToken(); if(!token)throw Object.assign(new Error("Crypto Pay is not configured"),{statusCode:503});
