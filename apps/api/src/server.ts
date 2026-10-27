@@ -312,7 +312,7 @@ app.get("/api/favorites",async(req)=>{const user=await auth(req);const r=await p
 app.post("/api/favorites/:productId",async(req)=>{const user=await auth(req);const productId=z.string().uuid().parse((req.params as any).productId);const r=await pool.query("insert into favorites(user_id,product_id) values($1,$2) on conflict do nothing returning product_id",[user.id,productId]);return {favorite:!!r.rowCount};});
 app.delete("/api/favorites/:productId",async(req)=>{const user=await auth(req);const productId=z.string().uuid().parse((req.params as any).productId);await pool.query("delete from favorites where user_id=$1 and product_id=$2",[user.id,productId]);return {favorite:false};});
 
-app.post("/api/chat/threads",async(req,reply)=>{const user=await auth(req);const body=z.object({sellerId:z.string().uuid(),productId:z.string().uuid().optional()}).parse(req.body);if(body.sellerId===user.id)return reply.code(400).send({error:"Cannot chat with yourself"});const seller=(await pool.query("select id,role from users where id=$1",[body.sellerId])).rows[0];if(!seller||seller.role!=="seller")return reply.code(404).send({error:"Seller not found"});const existingThread=(await pool.query(body.productId
+app.post("/api/chat/threads",async(req,reply)=>{const user=await auth(req);if(user.role==="seller"||user.role==="admin")return reply.code(403).send({error:"Только покупатель может начать диалог с продавцом"});const body=z.object({sellerId:z.string().uuid(),productId:z.string().uuid().optional()}).parse(req.body);if(body.sellerId===user.id)return reply.code(400).send({error:"Cannot chat with yourself"});const seller=(await pool.query("select id,role from users where id=$1",[body.sellerId])).rows[0];if(!seller||seller.role!=="seller")return reply.code(404).send({error:"Seller not found"});const existingThread=(await pool.query(body.productId
   ?"select * from chat_threads where buyer_id=$1 and seller_id=$2 and product_id=$3 limit 1"
   :"select * from chat_threads where buyer_id=$1 and seller_id=$2 and product_id is null limit 1",
  [user.id,body.sellerId,body.productId||null])).rows[0];
@@ -569,9 +569,19 @@ app.post("/api/payments/telegram/webhook",async(req,reply)=>{
   await withTransaction(async(c)=>{
    const p=(await c.query(`select p.*,o.buyer_id,o.status as order_status,o.expires_at from payments p join orders o on o.id=p.order_id where p.payload=$1 for update`,[payload])).rows[0];if(!p||p.order_status!=="created")return;
    if(p.expires_at&&new Date(p.expires_at).getTime()<=Date.now()){
+    // The reservation has already expired. Never leave inventory reserved after
+    // a late payment: create the refund workflow and release all non-completed
+    // seller-order reservations in the same transaction.
+    const sellerRows=(await c.query("select id,status from seller_orders where order_id=$1 for update",[p.order_id])).rows;
+    for(const so of sellerRows){
+      if(so.status!=="completed"){
+        await c.query("update inventory i set reserved=greatest(0,i.reserved-oi.quantity),updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[so.id]);
+        await c.query("update seller_orders set status='refunded' where id=$1 and status<>'completed'",[so.id]);
+      }
+    }
     await c.query("update payments set status='refund_pending',updated_at=now() where id=$1 and status<>'refunded'",[p.id]);
     await c.query("insert into refunds(order_id,payment_id,amount_minor,currency,status,reason) values($1,$2,$3,$4,'pending','Оплата получена после истечения резерва') on conflict(order_id) do nothing",[p.order_id,p.id,Number(p.amount_minor),p.currency]);
-    await c.query("update orders set status='disputed',updated_at=now() where id=$1 and status='created'",[p.order_id]);
+    await c.query("update orders set status='refund_pending',updated_at=now() where id=$1 and status='created'",[p.order_id]);
     await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'refund_pending','Требуется возврат','Оплата поступила после истечения резерва. Возврат ожидает подтверждения провайдера.' from orders where id=$1",[p.order_id]);
     return;
    }
