@@ -250,6 +250,50 @@ app.get("/api/seller/balance",async(req)=>{
  const x=r.rows[0];return {currency:"RUB",availableMinor:Number(x.available),pendingMinor:Number(pending.rows[0].pending),totalEarnedMinor:Number(x.available)+Number(pending.rows[0].pending)};
 });
 
+app.get("/api/admin/payouts",async(req,reply)=>{
+ const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
+ const q=z.object({status:z.enum(["pending","processing","completed","rejected","cancelled"]).optional(),limit:z.coerce.number().int().min(1).max(100).default(50)}).parse(req.query);
+ const values:any[]=[];let where="";
+ if(q.status){values.push(q.status);where="where p.status=$1";}
+ values.push(q.limit);
+ const r=await pool.query(`select p.id,p.seller_id,p.amount_minor,p.currency,p.status,p.provider_payout_id,p.created_at,p.completed_at,p.processed_by,p.admin_note,p.manual_reference,
+ u.first_name,u.last_name,u.username,sp.display_name from payouts p join users u on u.id=p.seller_id left join seller_profiles sp on sp.user_id=p.seller_id ${where} order by p.created_at desc limit $${values.length}`,values);
+ return {items:r.rows};
+});
+app.post("/api/admin/payouts/:id/process",async(req,reply)=>{
+ const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
+ const id=z.string().uuid().parse((req.params as any).id);
+ const body=z.object({manualReference:z.string().trim().max(200).optional(),note:z.string().trim().max(1000).optional()}).parse(req.body);
+ const result=await withTransaction(async(c)=>{
+   const payout=(await c.query("select * from payouts where id=$1 for update",[id])).rows[0];
+   if(!payout)return null;
+   if(payout.status==="completed")return payout;
+   if(["rejected","cancelled"].includes(payout.status))throw Object.assign(new Error("Payout is already closed"),{statusCode:409});
+   const updated=(await c.query("update payouts set status='completed',processed_by=$2,admin_note=$3,manual_reference=$4,completed_at=now() where id=$1 returning *",[id,admin.id,body.note||null,body.manualReference||null])).rows[0];
+   await c.query("insert into notifications(user_id,type,title,body) values($1,'payout_completed','Вывод выплачен',$2)",[payout.seller_id,`Заявка на вывод ${(Number(payout.amount_minor)/100).toFixed(2)} ${payout.currency} отмечена как выплаченная.`]);
+   return updated;
+ });
+ if(!result)return reply.code(404).send({error:"Payout not found"});
+ return {payout:result};
+});
+app.post("/api/admin/payouts/:id/reject",async(req,reply)=>{
+ const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
+ const id=z.string().uuid().parse((req.params as any).id);
+ const body=z.object({note:z.string().trim().min(2).max(1000)}).parse(req.body);
+ const result=await withTransaction(async(c)=>{
+   const payout=(await c.query("select * from payouts where id=$1 for update",[id])).rows[0];
+   if(!payout)return null;
+   if(payout.status==="rejected")return payout;
+   if(payout.status==="completed")throw Object.assign(new Error("Completed payout cannot be rejected"),{statusCode:409});
+   if(payout.status==="cancelled")throw Object.assign(new Error("Payout is cancelled"),{statusCode:409});
+   const updated=(await c.query("update payouts set status='rejected',processed_by=$2,admin_note=$3 where id=$1 returning *",[id,admin.id,body.note])).rows[0];
+   await c.query("insert into ledger_entries(seller_id,type,amount_minor,currency,description) values($1,'adjustment',$2,$3,$4)",[payout.seller_id,Number(payout.amount_minor),payout.currency,`Возврат средств по отклонённой заявке на вывод ${id}`]);
+   await c.query("insert into notifications(user_id,type,title,body) values($1,'payout_rejected','Заявка на вывод отклонена',$2)",[payout.seller_id,body.note]);
+   return updated;
+ });
+ if(!result)return reply.code(404).send({error:"Payout not found"});
+ return {payout:result};
+});
 app.get("/api/admin/platform-balance",async(req,reply)=>{
  const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
  const r=await pool.query("select currency,coalesce(sum(amount_minor),0)::bigint as balance from platform_ledger_entries group by currency");
