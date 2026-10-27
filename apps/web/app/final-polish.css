@@ -413,3 +413,18 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
   min-width:0!important;
   overflow-wrap:anywhere!important;
 }
+
+
+/* Restore the original clean Nookly brand mark */
+.brand-mark{
+  background:#ffffff!important;
+  border:2px solid #ffffff!important;
+  box-shadow:0 4px 0 rgba(0,0,0,.16),0 10px 22px rgba(0,0,0,.16)!important;
+}
+.brand-mark::after{display:none!important}
+.brand-mark span{
+  color:#1877d2!important;
+  text-shadow:none!important;
+  font-weight:900!important;
+  font-size:24px!important;
+}
