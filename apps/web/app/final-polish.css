@@ -180,3 +180,88 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
   .market-hero h1{font-size:30px!important}
   .market-hero-orb{width:78px!important;height:78px!important;font-size:38px!important}
 }
+
+/* Final polish — seller, chat, profile, orders */
+.chat-page,.profile-page,.seller-page,.orders-page{overflow:visible!important}
+.chat-head{padding-bottom:13px!important;border-bottom:1px solid rgba(255,255,255,.06)!important}
+.chat-head h1{font-size:22px!important;letter-spacing:-.04em!important}
+.small{font-size:9px!important;color:#819197!important}
+.chat-list{display:grid!important;gap:7px!important;margin-top:12px!important}
+.chat-thread{
+ width:100%!important;min-height:68px!important;padding:10px!important;display:flex!important;align-items:center!important;gap:10px!important;
+ border:1px solid #263e47!important;border-radius:17px!important;background:#0e1d24!important;color:#edf1f2!important;text-align:left!important;
+ box-shadow:0 7px 18px rgba(0,0,0,.14)!important;
+}
+.chat-thread:active{transform:scale(.99)!important}
+.chat-thread-icon{width:40px!important;height:40px!important;display:grid!important;place-items:center!important;border-radius:13px!important;background:#d5f1df!important;color:#172127!important;border:2px solid #fff!important;flex:0 0 auto!important}
+.chat-thread-main{min-width:0!important;flex:1!important}
+.chat-thread-main b,.chat-thread-main span{display:block!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}
+.chat-thread-main b{font-size:11px!important}
+.chat-thread-main span{margin-top:4px!important;font-size:9px!important;color:#819197!important}
+.chat-thread-meta{display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:6px!important;color:#708087!important}
+.chat-thread-meta strong{font-size:19px!important;color:#c4cfd2!important}
+.chat-messages{min-height:280px!important;max-height:52svh!important;overflow:auto!important;padding:13px 2px!important;display:flex!important;flex-direction:column!important;gap:7px!important}
+.chat-message{max-width:82%!important;padding:9px 11px!important;border-radius:15px!important;background:#14262e!important;border:1px solid #29414a!important;font-size:11px!important;line-height:1.4!important}
+.chat-message.mine{align-self:flex-end!important;background:#17372f!important;border-color:#2e5d4e!important}
+.chat-message small{display:block!important;margin-top:4px!important;opacity:.55!important;font-size:7px!important}
+.chat-compose{position:sticky!important;bottom:0!important;display:flex!important;gap:7px!important;padding-top:9px!important;background:linear-gradient(180deg,transparent,#0d1b22 24%)!important}
+.chat-input{min-width:0!important;flex:1!important;min-height:42px!important;border-radius:14px!important;border:1px solid #304851!important;background:#0a171d!important;padding:0 12px!important;color:#edf2f2!important}
+.chat-send{width:45px!important;min-width:45px!important;padding:0!important}
+.chat-offers{margin:5px 0 10px!important;padding:11px!important;border:1px solid #2b444c!important;border-radius:16px!important;background:#0b1920!important}
+.chat-offer{display:flex!important;align-items:center!important;gap:9px!important;padding:9px 0!important;border-bottom:1px solid rgba(255,255,255,.06)!important}
+.chat-offer:last-child{border-bottom:0!important}
+.chat-offer>div{min-width:0!important;flex:1!important}
+.chat-offer strong,.chat-offer span,.chat-offer small{display:block!important}
+.chat-offer strong{font-size:11px!important}
+.chat-offer span{margin-top:3px!important;font-size:9px!important;color:#efc66f!important}
+.chat-offer small{margin-top:3px!important;font-size:8px!important;color:#829198!important}
+.seller-hero{
+ border:1px solid #2b444c!important;border-radius:23px!important;
+ background:radial-gradient(circle at 90% 0,rgba(239,198,111,.16),transparent 28%),linear-gradient(145deg,#132831,#0b181f)!important;
+ padding:18px!important;box-shadow:0 16px 34px rgba(0,0,0,.25)!important;
+}
+.seller-hero h1{font-size:25px!important;letter-spacing:-.045em!important;margin:6px 0!important}
+.seller-hero p{font-size:9px!important;line-height:1.45!important;color:#91a0a6!important}
+.seller-hero .balance{margin-top:13px!important;font-size:27px!important;color:#efc66f!important;font-weight:900!important}
+.seller-stats{gap:7px!important;margin:10px 0!important}
+.seller-stats>div{border:1px solid #263e47!important;background:#0e1c23!important;border-radius:14px!important;padding:10px!important}
+.seller-stats b{font-size:16px!important;color:#edf2f2!important}
+.seller-stats span{font-size:8px!important;color:#778990!important}
+.seller-quick{gap:7px!important;display:grid!important;grid-template-columns:1.2fr 1fr 1fr!important;margin:10px 0 14px!important}
+.seller-quick button{min-width:0!important;padding:10px 6px!important;font-size:9px!important}
+.form-card{border:1px solid #263e47!important;background:#0e1c23!important;border-radius:18px!important;box-shadow:0 9px 22px rgba(0,0,0,.16)!important}
+.seller-product{
+ border:1px solid #263e47!important;background:#0d1b22!important;border-radius:16px!important;padding:10px!important;
+ margin-top:7px!important;
+}
+.seller-product-main{min-width:0!important}
+.seller-product-thumb{width:48px!important;height:48px!important;border-radius:11px!important;object-fit:cover!important}
+.seller-product-main b{font-size:11px!important}
+.seller-product-main span{font-size:8px!important;color:#829198!important}
+.seller-product-actions{gap:5px!important}
+.seller-product-actions strong{font-size:12px!important;color:#efc66f!important;margin-right:auto!important}
+.seller-product-actions button{font-size:8px!important;padding:7px 8px!important}
+.seller-alert{border:1px solid #4a4630!important;background:#241f12!important;border-radius:14px!important;padding:10px!important}
+.seller-alert.danger{border-color:#56353a!important;background:#26161a!important}
+.seller-alert b,.seller-alert span{font-size:9px!important}
+.profile-section,.profile-card{
+ border:1px solid #263e47!important;background:#0e1c23!important;border-radius:18px!important;
+ box-shadow:0 9px 22px rgba(0,0,0,.16)!important;
+}
+.profile-hero{border-radius:22px!important;background:linear-gradient(145deg,#142b34,#0b181f)!important;border:1px solid #2a444d!important}
+.profile-hero h1{letter-spacing:-.045em!important}
+.profile-avatar{border:2px solid #fff!important;box-shadow:0 5px 14px rgba(0,0,0,.28)!important}
+.order-card,.order-item{
+ border:1px solid #263e47!important;background:#0e1c23!important;border-radius:17px!important;
+ box-shadow:0 8px 20px rgba(0,0,0,.14)!important;
+}
+.order-card h3,.order-item b{font-size:12px!important}
+.status-badge{border-radius:999px!important;font-size:8px!important;font-weight:800!important;padding:5px 8px!important}
+.modal-card{border:1px solid #35505a!important;background:#0e1d24!important;color:#edf2f2!important}
+.modal-card h2{font-size:19px!important;letter-spacing:-.035em!important}
+.modal-card p{font-size:10px!important;line-height:1.45!important;color:#93a1a7!important}
+@media(max-width:380px){
+ .seller-quick{grid-template-columns:1fr 1fr!important}
+ .seller-quick .primary{grid-column:1/-1!important}
+ .chat-messages{min-height:250px!important}
+}
