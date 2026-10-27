@@ -178,6 +178,8 @@ export default function Home(){
  :<Cart cart={cart} total={total} setCart={setCart} checkout={checkout} loading={loading}/>;
 
  return <div className="app"><main className="shell"><header className="top"><div className="brand"><div className="brand-mark"><span>N</span></div><div><div className="brand-name">Nookly</div><div className="tagline">Твой маркетплейс. Свои люди. Свои товары.</div></div></div><button className="icon-btn" onClick={()=>{setTab("profile")}} aria-label="Уведомления">🔔{notifications.some(n=>!n.read_at)&&<span style={{position:"absolute",margin:"-25px 0 0 25px",width:7,height:7,borderRadius:"50%",background:"var(--gold)"}}/>}</button></header>{message&&<div className="toast" role="status"><span>{message}</span><button onClick={()=>setMessage("")} aria-label="Закрыть">×</button></div>}{page}{cart.length>0&&tab!=="cart"&&<button className="fab" onClick={()=>setTab("cart")}>🛒<span>{cart.length}</span></button>}<nav className="bottom sticker-nav">{[["home","🏡","Главная"],["catalog","🛒","Каталог"],["orders","🎁","Заказы"],["chat","🗨️","Чаты"],["profile","🪪","Профиль"]].map(([id,ico,label])=><button key={id} className={"nav "+(tab===id?"active":"")} onClick={()=>{setTab(id);if(id==="orders")loadOrders();if(id==="profile"&&user?.role==="seller")loadSeller()}}><strong>{ico}</strong><span>{label}</span></button>)}</nav></main></div>;
+}
+
 function Card({p,open,add,toggleFavorite,isFavorite}:{p:Product;open:()=>void;add:()=>void;toggleFavorite:(p:Product)=>Promise<void>;isFavorite:boolean}){
  const price=money(Number(p.price_minor??Math.round((p.price||0)*100)),p.currency);
  const stock=Number(p.available_stock??0);
