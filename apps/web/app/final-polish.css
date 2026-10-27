@@ -320,3 +320,79 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
   color:#e0e6e7!important;
   text-shadow:0 2px 10px rgba(0,0,0,.55)!important;
 }
+
+/* Hero card — brighter photographic glass treatment */
+.market-hero{
+  position:relative!important;
+  overflow:hidden!important;
+  min-height:260px!important;
+  border:1px solid rgba(108,151,161,.62)!important;
+  background:
+    linear-gradient(90deg,rgba(4,15,20,.62) 0%,rgba(4,15,20,.38) 52%,rgba(4,15,20,.16) 100%),
+    linear-gradient(180deg,rgba(3,13,18,.04),rgba(3,13,18,.30)),
+    url("https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1800&q=88") center/cover no-repeat!important;
+  box-shadow:0 22px 52px rgba(0,0,0,.42),inset 0 1px 0 rgba(255,255,255,.10)!important;
+}
+.market-hero::after{
+  content:""!important;
+  position:absolute!important;
+  inset:0!important;
+  pointer-events:none!important;
+  background:linear-gradient(120deg,rgba(255,255,255,.07),transparent 38%,rgba(239,198,111,.10))!important;
+}
+.market-hero-copy{position:relative!important;z-index:2!important;max-width:340px!important}
+.market-hero .eyebrow{
+  display:inline-block!important;
+  padding:6px 9px!important;
+  border-radius:999px!important;
+  background:rgba(239,198,111,.16)!important;
+  border:1px solid rgba(239,198,111,.38)!important;
+  backdrop-filter:blur(8px)!important;
+}
+.market-hero .market-hero-copy h1{
+  font-size:35px!important;
+  line-height:.96!important;
+  margin:12px 0 14px!important;
+  text-shadow:0 4px 20px rgba(0,0,0,.62)!important;
+}
+.market-hero .market-hero-copy p{
+  max-width:310px!important;
+  font-size:12px!important;
+  color:#f0f4f4!important;
+  text-shadow:0 3px 14px rgba(0,0,0,.7)!important;
+}
+.market-hero-actions{position:relative!important;z-index:3!important}
+.market-hero-orb{display:none!important}
+
+/* Nookly photo-brand mark */
+.brand-mark{
+  position:relative!important;
+  overflow:hidden!important;
+  background:
+    linear-gradient(145deg,rgba(12,22,28,.18),rgba(12,22,28,.62)),
+    url("https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=500&q=85") center/cover no-repeat!important;
+  border:2px solid rgba(255,255,255,.88)!important;
+}
+.brand-mark::after{
+  content:""!important;
+  position:absolute!important;
+  inset:0!important;
+  background:linear-gradient(145deg,rgba(239,198,111,.62),rgba(12,22,28,.18) 58%,rgba(4,13,18,.50))!important;
+  pointer-events:none!important;
+}
+.brand-mark span{
+  position:relative!important;
+  z-index:2!important;
+  display:grid!important;
+  place-items:center!important;
+  width:100%!important;
+  height:100%!important;
+  color:#101a1f!important;
+  font-weight:900!important;
+  font-size:23px!important;
+  text-shadow:0 1px 0 rgba(255,255,255,.35)!important;
+}
+@media(max-width:380px){
+  .market-hero{min-height:242px!important}
+  .market-hero .market-hero-copy h1{font-size:30px!important}
+}
