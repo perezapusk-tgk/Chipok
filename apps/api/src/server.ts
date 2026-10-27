@@ -419,6 +419,14 @@ app.post("/api/admin/refunds/:id/resolve",async(req,reply)=>{
   const order=(await c.query("select id,buyer_id,status from orders where id=$1 for update",[refund.order_id])).rows[0];
   if(!order)throw Object.assign(new Error("Order not found"),{statusCode:404});
   if(body.status==="completed"){
+   // A refund must never leave a non-completed seller order holding stock.
+   const sellerRows=(await c.query("select id,status from seller_orders where order_id=$1 for update",[refund.order_id])).rows;
+   for(const so of sellerRows){
+    if(so.status!=="completed"){
+     await c.query("update inventory i set reserved=greatest(0,i.reserved-oi.quantity),updated_at=now() from order_items oi where oi.seller_order_id=$1 and oi.product_id=i.product_id",[so.id]);
+     await c.query("update seller_orders set status='refunded' where id=$1 and status<>'completed'",[so.id]);
+    }
+   }
    await c.query("update refunds set status='completed',provider_refund_id=coalesce($1,provider_refund_id),completed_at=now(),updated_at=now() where id=$2",[body.providerRefundId||null,id]);
    await c.query("update payments set status='refunded',updated_at=now() where id=$1",[refund.payment_id]);
    await c.query("update orders set status='refunded',updated_at=now() where id=$1",[refund.order_id]);
