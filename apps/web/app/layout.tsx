@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Viewport } from "next";
 import "./globals.css";
+import "./final-polish.css";
 
 export const viewport: Viewport = {
   width: "device-width",
