@@ -428,3 +428,18 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
   font-weight:900!important;
   font-size:24px!important;
 }
+
+
+/* Final toast centering — independent from app shell positioning */
+.toast{
+  position:fixed!important;
+  inset-inline-start:50%!important;
+  inset-inline-end:auto!important;
+  top:max(10px,env(safe-area-inset-top))!important;
+  margin:0!important;
+  translate:-50% 0!important;
+  width:calc(100vw - 24px)!important;
+  max-width:500px!important;
+  min-width:0!important;
+  z-index:99999!important;
+}
