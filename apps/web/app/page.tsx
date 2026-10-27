@@ -16,7 +16,6 @@ declare global {
     Telegram?: {
       WebApp?: {
         ready:()=>void; expand:()=>void; initData?:string;
-        openInvoice?:(url:string,cb?:(status:string)=>void)=>void;
       }
     }
   }
