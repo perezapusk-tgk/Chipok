@@ -435,3 +435,16 @@ body{letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
 }
 .sticker-nav .nav:hover strong{transform:translateY(-3px) rotate(0deg) scale(1.05)!important}
 .sticker-nav .nav:active strong{transform:scale(.90)!important}
+
+/* Nookly sticker dock v5 — force fresh Pages release */
+.sticker-nav{height:88px!important;padding:10px 10px 12px!important;border-radius:30px!important;background:linear-gradient(180deg,rgba(15,24,31,.98),rgba(5,11,16,.98))!important;border:1px solid rgba(255,255,255,.14)!important;box-shadow:0 -14px 40px rgba(0,0,0,.48),inset 0 1px 0 rgba(255,255,255,.08)!important}
+.sticker-nav .nav{height:66px!important;border-radius:20px!important;gap:5px!important}
+.sticker-nav .nav strong{width:44px!important;height:44px!important;border:3px solid #fff!important;border-radius:15px 18px 16px 17px!important;box-shadow:0 5px 0 rgba(0,0,0,.30),0 10px 20px rgba(0,0,0,.28)!important}
+.sticker-nav .nav:nth-child(1) strong{background:linear-gradient(135deg,#fff0a8,#ffc95c)!important}
+.sticker-nav .nav:nth-child(2) strong{background:linear-gradient(135deg,#ead8ff,#bfa0ff)!important}
+.sticker-nav .nav:nth-child(3) strong{background:linear-gradient(135deg,#d8f4ff,#91d7ff)!important}
+.sticker-nav .nav:nth-child(4) strong{background:linear-gradient(135deg,#dcffe9,#91e4b7)!important}
+.sticker-nav .nav:nth-child(5) strong{background:linear-gradient(135deg,#ffe0ea,#ff9fbb)!important}
+.sticker-nav .nav.active strong{width:50px!important;height:50px!important;transform:translateY(-10px) rotate(0deg) scale(1.06)!important;box-shadow:0 5px 0 rgba(0,0,0,.26),0 15px 28px rgba(0,0,0,.36),0 0 0 4px rgba(243,203,114,.13)!important}
+.sticker-nav .nav.active span{transform:translateY(-7px)!important}
+@media(max-width:380px){.sticker-nav{height:80px!important;padding:8px 5px 9px!important}.sticker-nav .nav{height:62px!important}.sticker-nav .nav strong{width:38px!important;height:38px!important}.sticker-nav .nav.active strong{width:43px!important;height:43px!important}}
