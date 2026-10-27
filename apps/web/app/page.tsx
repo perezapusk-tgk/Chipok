@@ -8,7 +8,7 @@ type Product = {
   seller?:string; seller_id?:string; rating?:number; reviews?:number; category?:string; category_id?:string; image?:string;
   image_url?:string; available_stock?:number; status?:string; description?:string; fulfillment_type?:"meeting"|"pickup";
 };
-type Order = { id:string; status:string; total_minor:number; currency:string; created_at:string; seller_orders:any[] };
+type Order = { id:string; status:string; total_minor:number; currency:string; created_at:string; seller_orders:any[]; payment_currency?:string; payment_amount_minor?:number; fx_rate_rub_per_payment?:number };
 type User = { id:string; first_name:string; username?:string; role:string };
 
 declare global {
@@ -38,6 +38,7 @@ export default function Home(){
  const [cart,setCart]=useState<Product[]>([]),[selected,setSelected]=useState<Product|null>(null);
  const [products,setProducts]=useState<Product[]>(process.env.NODE_ENV==="production"?[]:fallback),[orders,setOrders]=useState<Order[]>([]),[user,setUser]=useState<User|null>(null),[categories,setCategories]=useState<any[]>([]),[notifications,setNotifications]=useState<any[]>([]);
  const [sellerProducts,setSellerProducts]=useState<any[]>([]),[loading,setLoading]=useState(false),[message,setMessage]=useState("");
+ const [paymentOrder,setPaymentOrder]=useState<any|null>(null);
  const tg=typeof window!=="undefined" ? window.Telegram?.WebApp : undefined;
  const authHeaders=():Record<string,string>=>{const initData=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";const headers:Record<string,string>={};if(initData)headers.Authorization="tma "+initData;return headers;};
 
@@ -106,10 +107,15 @@ export default function Home(){
     const grouped=Object.values(cart.reduce((a,p)=>{a[p.id]=(a[p.id]||{productId:p.id,quantity:0});a[p.id].quantity++;return a},{} as Record<string,{productId:string;quantity:number}>));
     const r=await fetch(api()+"/api/orders",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({items:grouped})});
     if(!r.ok)throw new Error((await r.json()).error||"Не удалось создать заказ");
+    const created=await r.json();
+    const payment=await fetch(api()+"/api/orders/"+created.order.id+"/payment-order",{method:"POST",headers:authHeaders()});
+    if(!payment.ok)throw new Error((await payment.json()).error||"Не удалось подготовить оплату");
+    const paymentData=await payment.json();
     setCart([]);
-    setTab("orders");
+    setPaymentOrder(paymentData);
     await loadOrders();
-    setMessage("Заказ создан. Продавец подтвердит наличие. Денежные расчёты на текущем этапе обрабатываются вручную.");
+    if(paymentData.configured===false)setMessage("Заказ создан, но платёжный сервис ещё не подключён.");
+    else setMessage("");
    }catch(e){
     setMessage(e instanceof Error?e.message:"Не удалось создать заказ");
    }finally{
@@ -143,7 +149,7 @@ export default function Home(){
  :tab==="profile"?<Profile user={user} sellerProducts={sellerProducts} setSellerProducts={setSellerProducts} loadSeller={loadSeller} setMessage={setMessage} categories={categories} notifications={notifications} readNotification={readNotification} openProduct={async(id)=>{const r=await fetch(api()+"/api/products/"+id,{cache:"no-store"});if(r.ok){const d=await r.json();const p=d.product;if(p){setSelected({...p,image:p.images?.[0]?.url||p.image_url||"",image_url:p.images?.[0]?.url||p.image_url||""});return;}}setMessage("Товар больше недоступен в каталоге.");}}/>
  :<Cart cart={cart} total={total} setCart={setCart} checkout={checkout} loading={loading}/>;
 
- return <div className="app"><main className="shell"><header className="top"><div className="brand"><div className="brand-mark"><span>N</span></div><div><div className="brand-name">Nookly</div><div className="tagline">Твой маркетплейс. Свои люди. Свои товары.</div></div></div><button className="icon-btn" onClick={()=>{setTab("profile")}} aria-label="Уведомления">🔔{notifications.some(n=>!n.read_at)&&<span style={{position:"absolute",margin:"-25px 0 0 25px",width:7,height:7,borderRadius:"50%",background:"var(--gold)"}}/>}</button></header>{message&&<div className="toast" role="status"><span>{message}</span><button onClick={()=>setMessage("")} aria-label="Закрыть">×</button></div>}{page}{cart.length>0&&tab!=="cart"&&<button className="fab" onClick={()=>setTab("cart")}>🛒<span>{cart.length}</span></button>}<nav className="bottom-nav-v6"><div className="nav-v6-glow"/>{[["home","🏠","Главная"],["catalog","🛍️","Каталог"],["orders","🎁","Заказы"],["chat","💬","Чаты"],["profile","👤","Профиль"]].map(([id,ico,label])=><button key={id} className={"nav "+(tab===id?"active":"")} onClick={()=>{setTab(id);if(id==="orders")loadOrders();if(id==="profile"&&user?.role==="seller")loadSeller()}}><span className="nav-v6-icon">{ico}</span><span className="nav-v6-label">{label}</span></button>)}</nav></main></div>;
+ return <div className="app"><main className="shell"><header className="top"><div className="brand"><div className="brand-mark"><span>N</span></div><div><div className="brand-name">Nookly</div><div className="tagline">Твой маркетплейс. Свои люди. Свои товары.</div></div></div><button className="icon-btn" onClick={()=>{setTab("profile")}} aria-label="Уведомления">🔔{notifications.some(n=>!n.read_at)&&<span style={{position:"absolute",margin:"-25px 0 0 25px",width:7,height:7,borderRadius:"50%",background:"var(--gold)"}}/>}</button></header>{message&&<div className="toast" role="status"><span>{message}</span><button onClick={()=>setMessage("")} aria-label="Закрыть">×</button></div>}{page}{cart.length>0&&tab!=="cart"&&<button className="fab" onClick={()=>setTab("cart")}>🛒<span>{cart.length}</span></button>}<nav className="bottom-nav-v6"><div className="nav-v6-glow"/>{[["home","🏠","Главная"],["catalog","🛍️","Каталог"],["orders","🎁","Заказы"],["chat","💬","Чаты"],["profile","👤","Профиль"]].map(([id,ico,label])=><button key={id} className={"nav "+(tab===id?"active":"")} onClick={()=>{setTab(id);if(id==="orders")loadOrders();if(id==="profile"&&user?.role==="seller")loadSeller()}}><span className="nav-v6-icon">{ico}</span><span className="nav-v6-label">{label}</span></button>)}</nav>{paymentOrder&&<div className="modal-backdrop" style={{position:"fixed",inset:0,zIndex:10070,display:"flex",alignItems:"center",justifyContent:"center",padding:20,background:"rgba(0,0,0,.72)"}}><div className="modal-card" style={{width:"100%",maxWidth:430,borderRadius:22,padding:22,background:"var(--panel,#13232b)",boxShadow:"0 20px 60px rgba(0,0,0,.45)"}}><div className="small">ПОДТВЕРЖДЕНИЕ ПОКУПКИ</div><h2 style={{margin:"8px 0 12px"}}>Оплата заказа</h2><div className="form-card" style={{margin:0}}><div className="row" style={{justifyContent:"space-between"}}><span>К оплате</span><b>{money(Number(paymentOrder.totalMinor||0),"RUB")}</b></div><div className="row" style={{justifyContent:"space-between"}}><span>Платёжный ордер</span><b>{"≈ $"+((Number(paymentOrder.paymentAmountMinor)||0)/100).toFixed(2)+" USDT"}</b></div><span className="small">Курс фиксируется для этого заказа и больше не пересчитывается.</span></div>{paymentOrder.configured===false?<><p className="small">Платёжный сервис ещё не подключён. Заказ сохранён, но оплатить его сейчас нельзя.</p><button className="secondary wide" onClick={()=>{setPaymentOrder(null);setTab("orders")}}>Закрыть</button></>:<><p className="small">Ты оплачиваешь сумму заказа в рублях. Внешний платёжный ордер использует зафиксированный эквивалент в USDT.</p><button className="primary wide" onClick={()=>{const u=paymentOrder.paymentUrl;if(u)window.location.href=u}}>Оплатить {money(Number(paymentOrder.totalMinor||0),"RUB")}</button><button className="secondary wide" onClick={()=>setPaymentOrder(null)}>Позже</button></>}</div></div>}</main></div>;
 }
 
 
