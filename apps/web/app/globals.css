@@ -374,3 +374,64 @@ body{letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
   .sticker-nav .nav strong{width:35px!important;height:35px!important;font-size:19px!important;border-radius:13px!important}
   .sticker-nav .nav.active strong{width:39px!important;height:39px!important}
 }
+
+
+/* Nookly sticker dock v4 — premium badge stickers */
+.sticker-nav{
+  display:grid!important;
+  grid-template-columns:repeat(5,1fr)!important;
+  align-items:center!important;
+  height:84px!important;
+  padding:8px 9px 10px!important;
+  gap:5px!important;
+  border-radius:28px!important;
+  background:rgba(8,14,19,.92)!important;
+  border:1px solid rgba(255,255,255,.10)!important;
+  box-shadow:0 -12px 36px rgba(0,0,0,.40),inset 0 1px 0 rgba(255,255,255,.07)!important;
+}
+.sticker-nav .nav{
+  min-width:0!important;height:64px!important;
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  border:0!important;background:transparent!important;
+  border-radius:18px!important;color:#84939b!important;
+  gap:4px!important;
+}
+.sticker-nav .nav strong{
+  position:relative!important;
+  width:41px!important;height:41px!important;
+  display:grid!important;place-items:center!important;
+  border:3px solid #fff!important;
+  border-radius:13px 17px 15px 16px!important;
+  font-size:21px!important;line-height:1!important;
+  background:#fff!important;
+  box-shadow:0 4px 0 rgba(0,0,0,.25),0 8px 16px rgba(0,0,0,.22)!important;
+  transform:rotate(-6deg)!important;
+  transition:.18s ease!important;
+}
+.sticker-nav .nav strong:after{
+  content:""!important;position:absolute!important;inset:3px!important;
+  border:1px dashed rgba(0,0,0,.10)!important;border-radius:9px!important;pointer-events:none!important;
+}
+.sticker-nav .nav:nth-child(1) strong{background:linear-gradient(135deg,#fff1b8,#ffd36e)!important}
+.sticker-nav .nav:nth-child(2) strong{background:linear-gradient(135deg,#eadcff,#c8a8ff)!important;transform:rotate(5deg)!important}
+.sticker-nav .nav:nth-child(3) strong{background:linear-gradient(135deg,#d9f4ff,#9edcff)!important;transform:rotate(-4deg)!important}
+.sticker-nav .nav:nth-child(4) strong{background:linear-gradient(135deg,#dcffe9,#9ee8be)!important;transform:rotate(6deg)!important}
+.sticker-nav .nav:nth-child(5) strong{background:linear-gradient(135deg,#ffe1ea,#ffb0c4)!important;transform:rotate(-5deg)!important}
+.sticker-nav .nav span{
+  font-size:8px!important;font-weight:700!important;letter-spacing:.01em!important;
+  color:inherit!important;
+}
+.sticker-nav .nav.active{color:#f3cb72!important;background:transparent!important}
+.sticker-nav .nav.active strong{
+  width:46px!important;height:46px!important;
+  transform:translateY(-9px) rotate(0deg) scale(1.05)!important;
+  box-shadow:0 4px 0 rgba(0,0,0,.24),0 13px 25px rgba(0,0,0,.34),0 0 0 4px rgba(243,203,114,.10)!important;
+}
+.sticker-nav .nav.active span{
+  transform:translateY(-6px)!important;
+  padding:3px 7px!important;border-radius:999px!important;
+  background:rgba(243,203,114,.11)!important;
+  color:#f3cb72!important;
+}
+.sticker-nav .nav:hover strong{transform:translateY(-3px) rotate(0deg) scale(1.05)!important}
+.sticker-nav .nav:active strong{transform:scale(.90)!important}
