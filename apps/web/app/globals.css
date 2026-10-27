@@ -448,3 +448,39 @@ body{letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
 .sticker-nav .nav.active strong{width:50px!important;height:50px!important;transform:translateY(-10px) rotate(0deg) scale(1.06)!important;box-shadow:0 5px 0 rgba(0,0,0,.26),0 15px 28px rgba(0,0,0,.36),0 0 0 4px rgba(243,203,114,.13)!important}
 .sticker-nav .nav.active span{transform:translateY(-7px)!important}
 @media(max-width:380px){.sticker-nav{height:80px!important;padding:8px 5px 9px!important}.sticker-nav .nav{height:62px!important}.sticker-nav .nav strong{width:38px!important;height:38px!important}.sticker-nav .nav.active strong{width:43px!important;height:43px!important}}
+
+
+/* Nookly bottom navigation — redesigned floating dock */
+.sticker-nav{
+  position:fixed!important;left:50%!important;bottom:12px!important;transform:translateX(-50%)!important;
+  z-index:100!important;width:min(94%,430px)!important;height:72px!important;padding:7px!important;
+  display:grid!important;grid-template-columns:repeat(5,1fr)!important;gap:4px!important;align-items:center!important;
+  border-radius:24px!important;background:rgba(10,16,21,.94)!important;
+  border:1px solid rgba(255,255,255,.13)!important;backdrop-filter:blur(18px)!important;
+  box-shadow:0 16px 42px rgba(0,0,0,.48),0 2px 0 rgba(255,255,255,.04) inset!important;
+}
+.sticker-nav .nav{
+  position:relative!important;width:100%!important;height:58px!important;padding:0!important;
+  display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:3px!important;
+  border:0!important;border-radius:18px!important;background:transparent!important;color:#7e8b92!important;
+}
+.sticker-nav .nav-icon{
+  width:36px!important;height:36px!important;display:grid!important;place-items:center!important;
+  border-radius:12px!important;background:#202c33!important;border:1px solid rgba(255,255,255,.08)!important;
+  color:#dbe3e6!important;font:700 20px/1 system-ui,sans-serif!important;
+  box-shadow:0 4px 9px rgba(0,0,0,.25)!important;transition:.18s ease!important;
+}
+.sticker-nav .nav:nth-child(3) .nav-icon{background:#27343b!important}
+.sticker-nav .nav-label{font-size:8px!important;line-height:1!important;font-weight:700!important;color:inherit!important;transition:.18s ease!important}
+.sticker-nav .nav.active{color:#f4ca70!important}
+.sticker-nav .nav.active .nav-icon{
+  width:43px!important;height:43px!important;margin-top:-13px!important;border-radius:14px!important;
+  background:linear-gradient(145deg,#f7df9e,#dba94e)!important;color:#172127!important;
+  border:3px solid #fff!important;box-shadow:0 5px 0 rgba(0,0,0,.22),0 12px 22px rgba(0,0,0,.34)!important;
+  transform:rotate(-3deg)!important;
+}
+.sticker-nav .nav.active .nav-label{transform:translateY(-7px)!important;color:#f4ca70!important}
+.sticker-nav .nav:hover .nav-icon{transform:translateY(-3px)!important;background:#2b3941!important}
+.sticker-nav .nav.active:hover .nav-icon{transform:translateY(0) rotate(-3deg)!important}
+.sticker-nav .nav:active .nav-icon{transform:scale(.91)!important}
+@media(max-width:380px){.sticker-nav{bottom:8px!important;width:96%!important;height:68px!important}.sticker-nav .nav{height:54px!important}.sticker-nav .nav-icon{width:32px!important;height:32px!important;font-size:18px!important}.sticker-nav .nav.active .nav-icon{width:39px!important;height:39px!important}.sticker-nav .nav-label{font-size:7px!important}}
