@@ -502,3 +502,101 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
   .finance-card input{width:auto!important;min-width:0!important}
   .finance-card .mini{padding-left:13px!important;padding-right:13px!important}
 }
+
+
+/* Final consistency pass: eliminate clipped/washed-out UI states */
+html,body,#__next{max-width:100%;overflow-x:hidden!important}
+.app,.shell{isolation:isolate!important}
+.shell{position:relative!important}
+
+/* Never let the global notification message push the page sideways */
+.toast{
+  box-sizing:border-box!important;
+  max-height:min(96px,calc(100vh - 24px))!important;
+  overflow:auto!important;
+  overscroll-behavior:contain!important;
+  -webkit-overflow-scrolling:touch!important;
+}
+.toast span{display:block!important;word-break:break-word!important}
+
+/* Inputs/selects/textareas must remain readable in dark mode */
+.form-card input,.form-card textarea,.form-card select,
+.profile-card input,.profile-card textarea,.profile-card select{
+  color:#eef3f3!important;
+  background:#0a171e!important;
+  border-color:#2d4650!important;
+  opacity:1!important;
+  color-scheme:dark!important;
+}
+.form-card input::placeholder,.form-card textarea::placeholder{color:#72848b!important;opacity:1!important}
+.form-card select{appearance:auto!important;-webkit-appearance:auto!important}
+.form-card input:focus,.form-card textarea:focus,.form-card select:focus{
+  border-color:#69848d!important;
+  box-shadow:0 0 0 2px rgba(239,198,111,.11)!important;
+}
+
+/* Cards and lists: prevent long names/prices from breaking layout */
+.profile-card,.hero,.form-card,.seller-product,.cart-row,.chat-offer,.notification-item{
+  min-width:0!important;
+  max-width:100%!important;
+}
+.profile-card *,.hero *,.form-card *{min-width:0}
+.seller-product-main,.seller-product-actions,.chat-thread-main,.chat-thread-meta{
+  min-width:0!important;
+}
+.seller-product-main span,.chat-thread-main span,.notification-copy small{
+  overflow-wrap:anywhere!important;
+}
+.seller-product-actions{flex-wrap:wrap!important;justify-content:flex-end!important}
+
+/* Seller finance and stats stay above decorative layers */
+.finance-card,.seller-stats,.seller-hero{isolation:isolate!important}
+.finance-card .row{position:relative!important;z-index:3!important}
+
+/* Modal backdrop is a real overlay, but never creates a grey content sheet */
+.modal-backdrop{
+  background:rgba(3,10,14,.78)!important;
+  backdrop-filter:blur(4px)!important;
+  -webkit-backdrop-filter:blur(4px)!important;
+}
+.modal-backdrop .modal-card{
+  background:linear-gradient(145deg,#12252e,#0b171e)!important;
+  border:1px solid #304b55!important;
+  color:#eef3f3!important;
+  max-height:calc(100dvh - 40px)!important;
+  overflow:auto!important;
+}
+
+/* Profile menu buttons: clear separation and reliable tap targets */
+.profile-page .menu button{
+  min-height:50px!important;
+  border-color:#263e47!important;
+  background:#0e1d24!important;
+  color:#edf2f2!important;
+}
+.profile-page .menu button:active{transform:scale(.99)!important;background:#132730!important}
+.profile-alert{min-height:58px!important}
+
+/* Catalog/detail imagery should never create an opaque grey block */
+.product-card-image,.detail-image,.cart-row img,.seller-product-thumb{
+  background:#0a151b!important;
+}
+.product-card-image img,.detail-image img,.cart-row img,.seller-product-thumb{
+  object-fit:cover!important;
+}
+
+/* Bottom navigation stays above content and below true modal/toast layers */
+.bottom-nav-v6{z-index:1000!important}
+.fab{z-index:1100!important}
+
+/* Small screens: prevent horizontal squeeze in finance and seller actions */
+@media(max-width:480px){
+  .shell{padding-left:12px!important;padding-right:12px!important}
+  .seller-product{gap:9px!important}
+  .seller-product-actions{width:100%!important;justify-content:flex-start!important}
+  .seller-product-actions strong{margin-right:auto!important}
+  .finance-card .row{width:100%!important}
+  .finance-card input{font-size:14px!important}
+  .modal-backdrop{padding:12px!important}
+  .modal-backdrop .modal-card{max-height:calc(100dvh - 24px)!important}
+}
