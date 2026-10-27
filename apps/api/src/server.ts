@@ -125,6 +125,17 @@ async function auth(request:any){
 }
 app.get("/",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.4.0",health:"/health"}));
 app.get("/health",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.4.0"}));
+async function configureCryptoPayWebhook(){
+ const token=cryptoPayToken(), base=process.env.TELEGRAM_WEBHOOK_URL?.trim();
+ if(!token||!base)return;
+ const webhookUrl=new URL("/api/payments/cryptopay/webhook",base).toString();
+ try{
+   const r=await fetch("https://pay.crypt.bot/api/setWebhook",{method:"POST",headers:{"Crypto-Pay-API-Token":token,"Content-Type":"application/json"},body:JSON.stringify({url:webhookUrl})});
+   const data=await r.json() as any;
+   if(!data.ok)app.log.warn({description:data.error},"Crypto Pay webhook registration failed");
+   else app.log.info({webhookUrl},"Crypto Pay webhook registered");
+ }catch(error){app.log.warn({err:error},"Crypto Pay webhook configuration request failed")}
+}
 async function configureTelegramWebhook(){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  const secret=process.env.TELEGRAM_WEBHOOK_SECRET||process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;
@@ -713,7 +724,7 @@ let bootPromise:Promise<void>|null=null;
 export async function bootstrap(){
  if(!bootPromise)bootPromise=(async()=>{
   await runMigrations();
-  await configureTelegramWebhook().catch(error=>app.log.error(error,"Failed to configure Telegram webhook"));
+  await configureTelegramWebhook().catch(error=>app.log.error(error,"Failed to configure Telegram webhook"));\n  await configureCryptoPayWebhook().catch(error=>app.log.error(error,"Failed to configure Crypto Pay webhook"));
  })();
  return bootPromise;
 }
