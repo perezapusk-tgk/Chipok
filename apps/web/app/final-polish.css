@@ -443,3 +443,62 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
   min-width:0!important;
   z-index:99999!important;
 }
+
+
+/* Seller finance panel — keep controls visible on every viewport */
+.finance-card{
+  position:relative!important;
+  overflow:visible!important;
+  z-index:2!important;
+  background:linear-gradient(145deg,#0e1d24,#0a171d)!important;
+  color:#edf2f2!important;
+}
+.finance-card>div{min-width:0!important}
+.finance-card .row{
+  display:flex!important;
+  align-items:center!important;
+  gap:8px!important;
+  margin-top:10px!important;
+}
+.finance-card input{
+  min-width:0!important;
+  flex:1 1 auto!important;
+  height:42px!important;
+  padding:0 12px!important;
+  border:1px solid #304851!important;
+  border-radius:13px!important;
+  background:#08151b!important;
+  color:#f0f4f4!important;
+  outline:none!important;
+  opacity:1!important;
+  -webkit-appearance:none!important;
+  appearance:none!important;
+}
+.finance-card input:focus{
+  border-color:#5a7b86!important;
+  background:#0a1920!important;
+  box-shadow:0 0 0 2px rgba(239,198,111,.12)!important;
+}
+.finance-card input::placeholder{color:#71838a!important;opacity:1!important}
+.finance-card .mini{
+  min-height:42px!important;
+  flex:0 0 auto!important;
+}
+
+/* Prevent transparent/grey layers from obscuring seller controls */
+.modal-backdrop{
+  isolation:isolate!important;
+}
+.modal-backdrop .modal-card{
+  position:relative!important;
+  z-index:1!important;
+  opacity:1!important;
+  filter:none!important;
+}
+
+/* Mobile: payout controls never collapse into an unreadable strip */
+@media(max-width:420px){
+  .finance-card .row{align-items:stretch!important}
+  .finance-card input{width:auto!important;min-width:0!important}
+  .finance-card .mini{padding-left:13px!important;padding-right:13px!important}
+}
