@@ -265,3 +265,19 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
  .seller-quick .primary{grid-column:1/-1!important}
  .chat-messages{min-height:250px!important}
 }
+
+/* Hero headline refinement only */
+.market-hero .market-hero-copy h1{
+  font-size:32px!important;
+  line-height:.98!important;
+  letter-spacing:-.052em!important;
+  font-weight:900!important;
+  text-wrap:balance!important;
+  text-shadow:0 2px 0 rgba(0,0,0,.16),0 8px 24px rgba(0,0,0,.16)!important;
+}
+.market-hero .market-hero-copy h1::first-line{
+  color:#f1ca73!important;
+}
+@media(max-width:380px){
+  .market-hero .market-hero-copy h1{font-size:29px!important;letter-spacing:-.048em!important}
+}
