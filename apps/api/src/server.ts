@@ -160,6 +160,7 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
   for(const item of body.items){
    const p=(await c.query(`select p.id,p.seller_id,p.title,p.price_minor,p.currency,p.fulfillment_type,i.stock,i.reserved,u.role from products p join inventory i on i.product_id=p.id join users u on u.id=p.seller_id where p.id=$1 and p.status='published' for update of p,i,u`,[item.productId])).rows[0];
    if(!p)throw Object.assign(new Error("Product unavailable"),{statusCode:409});
+   if(String(p.currency).toUpperCase()!=="RUB")throw Object.assign(new Error("Nookly accepts only RUB catalog prices"),{statusCode:409});
    if(String(p.seller_id)===String(buyer.id))throw Object.assign(new Error("Нельзя купить собственный товар"),{statusCode:409});
    const sellerProfile=(await c.query("select reliability_score from seller_profiles where user_id=$1",[p.seller_id])).rows[0];
    const sellerReliability=Number(sellerProfile?.reliability_score ?? 0);
@@ -183,6 +184,7 @@ app.post("/api/orders/:id/payment-order",async(req,reply)=>{
    const order=(await c.query("select * from orders where id=$1 and buyer_id=$2 for update",[id,buyer.id])).rows[0];
    if(!order)return null;
    if(order.status!=="created")throw Object.assign(new Error("Заказ уже нельзя оплатить на этом этапе"),{statusCode:409});
+   if(String(order.currency).toUpperCase()!=="RUB")throw Object.assign(new Error("Only RUB orders can be paid through this checkout"),{statusCode:409});
    let payment=(await c.query("select * from payments where order_id=$1 for update",[id])).rows[0];
    if(!payment){
      const quote=paymentQuote(Number(order.total_minor));
