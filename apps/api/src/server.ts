@@ -415,7 +415,7 @@ app.get("/api/admin/orders",async(req,reply)=>{
  const values:any[]=[];let where="";
  if(q.status){values.push(q.status);where=" where o.status=$1";}
  values.push(q.limit);
- const r=await pool.query(`select o.id,o.status,o.total_minor,o.currency,o.platform_fee_minor,o.created_at,
+ const r=await pool.query(`select o.id,o.status,o.total_minor,o.currency,o.platform_fee_minor,o.payment_currency,o.payment_amount_minor,o.fx_rate_rub_per_payment,o.payment_rate_locked_at,o.created_at,
  count(distinct so.id)::int as seller_orders
  from orders o left join seller_orders so on so.order_id=o.id${where}
  group by o.id order by o.created_at desc limit $${values.length}`,values);
