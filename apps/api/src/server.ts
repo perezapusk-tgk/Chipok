@@ -15,6 +15,7 @@ async function telegramSendMessage(chatId:number|string,text:string,replyMarkup?
 
 import { runMigrations } from "./migrate.js";
 export const app=Fastify({logger:true});
+app.addContentTypeParser("application/json",{parseAs:"string"},(req:any,body:any,done:any)=>{req.rawBody=String(body);try{done(null,JSON.parse(String(body)))}catch(error){done(error as Error)}});
 app.setErrorHandler((error,req,reply)=>{
   req.log.error({err:error},"Unhandled API error");
   const err:any=error;
@@ -208,7 +209,7 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
 app.post("/api/orders/:id/payment-order",async(req,reply)=>{
  const buyer=await auth(req);
  const id=z.string().uuid().parse((req.params as any).id);
- const result=await withTransaction(async(c)=>{
+ const locked=await withTransaction(async(c)=>{
    const order=(await c.query("select * from orders where id=$1 and buyer_id=$2 for update",[id,buyer.id])).rows[0];
    if(!order)return null;
    if(order.status!=="created")throw Object.assign(new Error("Заказ уже нельзя оплатить на этом этапе"),{statusCode:409});
@@ -216,17 +217,65 @@ app.post("/api/orders/:id/payment-order",async(req,reply)=>{
    let payment=(await c.query("select * from payments where order_id=$1 for update",[id])).rows[0];
    if(!payment){
      const quote=paymentQuote(Number(order.total_minor));
-     payment=(await c.query("insert into payments(order_id,provider,status,amount_minor,currency,payment_currency,payment_amount_minor,fx_rate_rub_per_payment) values($1,'external_order','pending',$2,'RUB',$3,$4,$5) returning *",[id,Number(order.total_minor),"USDT",quote.amountMinor,quote.rate])).rows[0];
+     payment=(await c.query("insert into payments(order_id,provider,status,amount_minor,currency,payment_currency,payment_amount_minor,fx_rate_rub_per_payment) values($1,'cryptopay','pending',$2,'RUB',$3,$4,$5) returning *",[id,Number(order.total_minor),"USDT",quote.amountMinor,quote.rate])).rows[0];
      await c.query("update orders set payment_currency=$2,payment_amount_minor=$3,fx_rate_rub_per_payment=$4,payment_rate_locked_at=now(),updated_at=now() where id=$1",[id,"USDT",quote.amountMinor,quote.rate]);
    }
-   const url=buildPaymentOrderUrl(id,Number(payment.payment_amount_minor));
-   if(!url)return {configured:false,orderId:id,totalMinor:Number(order.total_minor),paymentCurrency:String(payment.payment_currency||"USDT"),paymentAmountMinor:Number(payment.payment_amount_minor),fxRateRubPerPayment:Number(payment.fx_rate_rub_per_payment)};
-   await c.query("update payments set invoice_link=$2,updated_at=now() where id=$1",[payment.id,url]);
-   return {configured:true,orderId:id,totalMinor:Number(order.total_minor),paymentCurrency:String(payment.payment_currency||"USDT"),paymentAmountMinor:Number(payment.payment_amount_minor),fxRateRubPerPayment:Number(payment.fx_rate_rub_per_payment),paymentUrl:url};
+   return {orderId:id,paymentId:payment.id,totalMinor:Number(order.total_minor),paymentAmountMinor:Number(payment.payment_amount_minor),fxRateRubPerPayment:Number(payment.fx_rate_rub_per_payment),invoiceId:payment.provider_invoice_id||null,paymentUrl:payment.invoice_link||null};
  });
- if(!result)return reply.code(404).send({error:"Order not found"});
- return result;
+ if(!locked)return reply.code(404).send({error:"Order not found"});
+ if(locked.paymentUrl)return {configured:true,...locked,paymentCurrency:"USDT",paymentUrl:locked.paymentUrl};
+ if(!cryptoPayToken()){
+   const url=buildPaymentOrderUrl(locked.orderId,locked.paymentAmountMinor);
+   if(url){
+     await pool.query("update payments set provider='external_order',invoice_link=$2,updated_at=now() where id=$1",[locked.paymentId,url]);
+     return {configured:true,...locked,paymentCurrency:"USDT",paymentUrl:url};
+   }
+   return {configured:false,...locked,paymentCurrency:"USDT"};
+ }
+ const invoice=await createCryptoPayInvoice(locked.orderId,locked.paymentAmountMinor);
+ const saved=await pool.query("update payments set provider='cryptopay',provider_invoice_id=$2,provider_payment_id=$2,invoice_link=$3,provider_payload=$4,updated_at=now() where id=$1 and provider_invoice_id is null returning *",[locked.paymentId,invoice.invoiceId,invoice.paymentUrl,JSON.stringify(invoice.providerPayload)]);
+ if(!saved.rowCount){
+   const existing=(await pool.query("select invoice_link,provider_invoice_id from payments where id=$1",[locked.paymentId])).rows[0];
+   return {configured:true,...locked,paymentCurrency:"USDT",paymentUrl:existing?.invoice_link||invoice.paymentUrl,invoiceId:existing?.provider_invoice_id||invoice.invoiceId};
+ }
+ return {configured:true,...locked,paymentCurrency:"USDT",paymentUrl:invoice.paymentUrl,invoiceId:invoice.invoiceId};
 });
+
+app.post("/api/payments/cryptopay/webhook",async(req:any,reply)=>{
+ const signature=String(req.headers["crypto-pay-api-signature"]||"");
+ const rawBody=String(req.rawBody||JSON.stringify(req.body));
+ if(!cryptoPaySignatureValid(rawBody,signature))return reply.code(401).send({error:"Invalid webhook signature"});
+ const update=req.body as any;
+ if(update?.update_type!=="invoice_paid"||!update?.payload)return {ok:true};
+ const invoice=update.payload;
+ const invoiceId=String(invoice.invoice_id||"");
+ const orderId=String(invoice.payload||"");
+ if(!invoiceId||!orderId)return {ok:true};
+ let verified:any;
+ try{
+   const rows=await cryptoPay("getInvoices",{invoice_ids:[Number(invoiceId)]});
+   verified=Array.isArray(rows)&&rows.length?rows[0]:null;
+ }catch(error){req.log.error({err:error},"Crypto Pay invoice verification failed");return reply.code(502).send({error:"Payment verification failed"});}
+ if(!verified||String(verified.status)!=="paid"||String(verified.asset)!=="USDT")return reply.code(409).send({error:"Invoice is not confirmed"});
+ const paidMinor=Math.round(Number(verified.amount)*100);
+ const result=await withTransaction(async(c)=>{
+   const payment=(await c.query("select p.*,o.buyer_id,o.status as order_status,o.total_minor,o.payment_amount_minor from payments p join orders o on o.id=p.order_id where p.provider_invoice_id=$1 and p.order_id=$2 for update",[invoiceId,orderId])).rows[0];
+   if(!payment)return null;
+   if(Number(payment.payment_amount_minor)!==paidMinor)throw Object.assign(new Error("Paid amount does not match the order"),{statusCode:409});
+   if(payment.status==="paid")return {alreadyPaid:true,orderId:payment.order_id};
+   await c.query("insert into payment_transactions(payment_id,idempotency_key,provider_event_id,event_type,payload) values($1,$2,$3,'invoice_paid',$4) on conflict(idempotency_key) do nothing",[payment.id,`cryptopay:invoice:${invoiceId}`,String(update.update_id||invoiceId),JSON.stringify(update)]);
+   await c.query("update payments set status='paid',updated_at=now() where id=$1",[payment.id]);
+   await c.query("update seller_orders set status='paid' where order_id=$1 and status='created'",[payment.order_id]);
+   await c.query("update orders set status='paid',updated_at=now() where id=$1 and status='created'",[payment.order_id]);
+   await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_paid','Оплата подтверждена',$2)",[payment.buyer_id,`Заказ оплачен: ${(Number(payment.total_minor)/100).toFixed(2)} ₽. Продавец получил уведомление.`]);
+   await c.query("insert into notifications(user_id,type,title,body) select so.seller_id,'new_paid_order','Новый оплаченный заказ',$2 from seller_orders so where so.order_id=$1",[payment.order_id,`Получена оплата за заказ на ${(Number(payment.total_minor)/100).toFixed(2)} ₽. Подтвердите наличие товара.`]);
+   return {alreadyPaid:false,orderId:payment.order_id};
+ });
+ if(!result)return reply.code(404).send({error:"Payment/order not found"});
+ return {ok:true,...result};
+});
+app.get("/api/payments/cryptopay/webhook",async()=>({ok:true,route:"cryptopay-webhook",method:"POST"}));
+
 app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
  const seller=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
  const result=await withTransaction(async(c)=>{
