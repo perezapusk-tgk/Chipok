@@ -511,3 +511,48 @@ body{letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
 .bottom-nav-v6 .nav.active .nav-v6-label{transform:translateY(-5px)!important}
 .bottom-nav-v6 .nav:active .nav-v6-icon{transform:scale(.9)!important}
 @media(max-width:380px){.bottom-nav-v6{width:calc(100% - 14px)!important;height:68px!important;bottom:7px!important;padding:5px!important}.bottom-nav-v6 .nav{height:56px!important}.bottom-nav-v6 .nav-v6-icon{width:30px!important;height:30px!important;font-size:16px!important}.bottom-nav-v6 .nav.active .nav-v6-icon{width:36px!important;height:36px!important}.bottom-nav-v6 .nav-v6-label{font-size:7px!important}}
+
+
+/* Nookly NAV v7 — clean Telegram-friendly sticker dock */
+html{font-size:16px!important;-webkit-text-size-adjust:100%!important;text-size-adjust:100%!important;overflow-x:hidden!important}
+body{overflow-x:hidden!important;overscroll-behavior-x:none!important}
+.app{width:100%;min-height:100svh!important;overflow-x:hidden!important}
+.shell{width:100%!important;max-width:520px!important;min-width:0!important;padding:16px 14px calc(96px + env(safe-area-inset-bottom))!important}
+.bottom-nav-v6{
+ position:fixed!important;left:50%!important;bottom:calc(8px + env(safe-area-inset-bottom))!important;transform:translateX(-50%)!important;
+ z-index:1000!important;width:min(480px,calc(100% - 20px))!important;height:72px!important;padding:6px!important;
+ display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:4px!important;
+ background:rgba(7,17,23,.97)!important;border:1px solid #29414b!important;border-radius:22px!important;
+ box-shadow:0 10px 30px rgba(0,0,0,.45)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important;
+}
+.bottom-nav-v6 .nav-v6-glow{display:none!important}
+.bottom-nav-v6 .nav{
+ min-width:0!important;width:100%!important;height:58px!important;margin:0!important;padding:3px 1px!important;
+ display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:3px!important;
+ border:0!important;border-radius:16px!important;background:transparent!important;color:#829198!important;
+}
+.bottom-nav-v6 .nav-v6-icon{
+ flex:0 0 auto!important;width:34px!important;height:34px!important;display:grid!important;place-items:center!important;
+ border:2px solid rgba(255,255,255,.9)!important;border-radius:11px!important;
+ background:#f4ead8!important;color:#172126!important;
+ font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif!important;
+ font-size:18px!important;line-height:1!important;font-weight:400!important;
+ box-shadow:0 3px 0 rgba(0,0,0,.22)!important;transform:none!important;transition:transform .15s ease!important;
+}
+.bottom-nav-v6 .nav:nth-of-type(2) .nav-v6-icon{background:#dfd1ff!important}
+.bottom-nav-v6 .nav:nth-of-type(3) .nav-v6-icon{background:#c7eaff!important}
+.bottom-nav-v6 .nav:nth-of-type(4) .nav-v6-icon{background:#c9efd9!important}
+.bottom-nav-v6 .nav:nth-of-type(5) .nav-v6-icon{background:#ffd2df!important}
+.bottom-nav-v6 .nav-v6-label{display:block!important;max-width:100%!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;font-size:8px!important;line-height:1!important;font-weight:700!important;color:inherit!important}
+.bottom-nav-v6 .nav.active{background:#13262e!important;color:#f2c96d!important;box-shadow:inset 0 0 0 1px #36505a!important}
+.bottom-nav-v6 .nav.active .nav-v6-icon{width:38px!important;height:38px!important;margin-top:-4px!important;border-width:2px!important;border-radius:12px!important;background:#f2c96d!important;box-shadow:0 4px 0 rgba(0,0,0,.24),0 7px 14px rgba(0,0,0,.24)!important;transform:none!important}
+.bottom-nav-v6 .nav.active .nav-v6-label{transform:none!important;color:#f2c96d!important}
+.bottom-nav-v6 .nav:active .nav-v6-icon{transform:scale(.94)!important}
+@media(max-width:380px){
+ .shell{padding-left:10px!important;padding-right:10px!important}
+ .bottom-nav-v6{width:calc(100% - 12px)!important;height:68px!important;padding:5px!important;border-radius:20px!important}
+ .bottom-nav-v6 .nav{height:56px!important}
+ .bottom-nav-v6 .nav-v6-icon{width:30px!important;height:30px!important;font-size:16px!important;border-radius:10px!important}
+ .bottom-nav-v6 .nav.active .nav-v6-icon{width:34px!important;height:34px!important}
+ .bottom-nav-v6 .nav-v6-label{font-size:7px!important}
+}
