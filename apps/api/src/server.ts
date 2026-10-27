@@ -73,6 +73,11 @@ async function auth(request:any){
  if(!raw) throw Object.assign(new Error("Unauthorized"),{statusCode:401});
  const user=validateTelegramInitData(raw,env("TELEGRAM_BOT_TOKEN"),Number(process.env.TELEGRAM_INIT_DATA_MAX_AGE||86400));
  const r=await pool.query(`insert into users(telegram_id,first_name,last_name,username,language_code,is_premium) values($1,$2,$3,$4,$5,$6) on conflict(telegram_id) do update set first_name=excluded.first_name,last_name=excluded.last_name,username=excluded.username,language_code=excluded.language_code,is_premium=excluded.is_premium,updated_at=now() returning id,telegram_id,first_name,last_name,username,language_code,is_premium,role`,[user.id,user.first_name,user.last_name??null,user.username??null,user.language_code??null,user.is_premium??false]);
+ const adminTelegramId=process.env.ADMIN_TELEGRAM_ID?.trim();
+ if(adminTelegramId && String(user.id)===adminTelegramId && r.rows[0].role!=="admin"){
+   const promoted=await pool.query("update users set role='admin',updated_at=now() where id=$1 returning id,telegram_id,first_name,last_name,username,language_code,is_premium,role",[r.rows[0].id]);
+   return promoted.rows[0];
+ }
  return r.rows[0];
 }
 app.get("/",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.4.0",health:"/health"}));
