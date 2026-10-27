@@ -306,7 +306,7 @@ function Profile({user,sellerProducts,setSellerProducts,loadSeller,setMessage,ca
  </div>;
  if(mode==="seller")return <SellerPanel products={sellerProducts} loadSeller={loadSeller} setSellerProducts={setSellerProducts} setMessage={setMessage} back={()=>setMode("profile")} categories={categories}/>;
  if(mode==="onboard")return <SellerOnboard setMessage={setMessage} onDone={()=>window.location.reload()} back={()=>setMode("profile")}/>;
- if(mode==="admin")return <AdminPanel setMessage={setMessage} back={()=>setMode("profile")}/>;
+ if(mode==="admin" && user?.role==="admin")return <AdminPanel setMessage={setMessage} back={()=>setMode("profile")}/>;
  return <div className="profile-page">
   <div className="profile-card">
    <div className="row"><div className="avatar">{(user?.first_name||"Ч").slice(0,1)}</div><div style={{minWidth:0}}><b>{user?.first_name||"Покупатель"}</b><div className="small">{seller?"Продавец":admin?"Администратор":"Покупатель"}{user?.username?" · @"+user.username:""}</div></div></div>
