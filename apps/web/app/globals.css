@@ -243,3 +243,65 @@ body{letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
   .sticker-nav .nav.active strong{width:38px!important;height:38px!important}
   .sticker-nav .nav span{font-size:7px!important}
 }
+
+
+/* Nookly product cards — modern sticker treatment */
+.product-card{
+  position:relative!important;
+  overflow:hidden!important;
+  border:1px solid rgba(255,255,255,.09)!important;
+  border-radius:22px!important;
+  background:linear-gradient(180deg,rgba(24,35,42,.96),rgba(11,20,26,.98))!important;
+  box-shadow:0 12px 28px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.035)!important;
+  cursor:pointer!important;
+  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease!important;
+}
+.product-card:hover{transform:translateY(-3px)!important;border-color:rgba(232,185,94,.25)!important;box-shadow:0 18px 34px rgba(0,0,0,.30)!important}
+.product-card-image{position:relative!important;height:178px!important;overflow:hidden!important;background:#111c22!important}
+.product-card-image img{width:100%!important;height:100%!important;display:block!important;object-fit:cover!important;transition:transform .35s ease!important}
+.product-card:hover .product-card-image img{transform:scale(1.045)!important}
+.product-card-image:after{content:"";position:absolute;inset:45% 0 0;background:linear-gradient(transparent,rgba(4,10,14,.72));pointer-events:none!important}
+.favorite-sticker{
+  position:absolute!important;right:10px!important;top:10px!important;z-index:2!important;
+  width:36px!important;height:36px!important;border-radius:13px!important;
+  display:grid!important;place-items:center!important;
+  border:2px solid rgba(255,255,255,.85)!important;
+  background:rgba(13,20,26,.78)!important;color:#fff!important;
+  font-size:19px!important;box-shadow:0 4px 0 rgba(0,0,0,.16)!important;
+  transform:rotate(4deg)!important;backdrop-filter:blur(8px)!important;
+}
+.favorite-sticker.active{color:#ef718d!important;background:#fff1f4!important;border-color:#fff!important}
+.stock-sticker{
+  position:absolute!important;left:9px!important;bottom:9px!important;z-index:2!important;
+  padding:5px 8px!important;border-radius:999px!important;
+  background:#fff0b8!important;color:#382b0d!important;
+  font-size:8px!important;font-weight:800!important;
+  transform:rotate(-3deg)!important;box-shadow:0 3px 0 rgba(0,0,0,.16)!important;
+}
+.product-card-body{padding:12px 12px 11px!important}
+.product-card-category{
+  display:inline-block!important;margin-bottom:5px!important;
+  font-size:8px!important;font-weight:700!important;letter-spacing:.08em!important;
+  text-transform:uppercase!important;color:#9baab1!important
+}
+.product-card h3{margin:0 0 7px!important;font-size:14px!important;line-height:1.2!important;letter-spacing:-.02em!important;color:#f3f6f7!important;display:-webkit-box!important;-webkit-line-clamp:2!important;-webkit-box-orient:vertical!important;overflow:hidden!important}
+.product-card-seller{display:flex!important;align-items:center!important;gap:5px!important;min-width:0!important;color:#8d9ca3!important;font-size:9px!important}
+.product-card-seller>span{font-size:8px!important;color:#73d3a0!important}
+.product-card-seller em{margin-left:auto!important;font-style:normal!important;color:#eac36f!important;font-weight:700!important}
+.product-card-footer{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:8px!important;margin-top:11px!important}
+.product-card-footer strong{font-size:17px!important;letter-spacing:-.03em!important;color:#f5d17d!important}
+.add-sticker{
+  min-width:38px!important;height:34px!important;padding:0 10px!important;
+  border-radius:13px!important;border:2px solid #fff!important;
+  background:linear-gradient(145deg,#f5e6c0,#dfb55d)!important;color:#1a2023!important;
+  font-size:17px!important;font-weight:800!important;
+  box-shadow:0 4px 0 rgba(0,0,0,.18)!important;
+  transform:rotate(-2deg)!important;
+}
+.add-sticker:disabled{opacity:.55!important;filter:grayscale(.4)!important}
+@media(max-width:380px){
+ .product-card-image{height:150px!important}
+ .product-card-body{padding:10px!important}
+ .product-card h3{font-size:13px!important}
+ .product-card-footer strong{font-size:15px!important}
+}
