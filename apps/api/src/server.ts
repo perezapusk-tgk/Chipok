@@ -39,6 +39,20 @@ await app.register(cors,{
  maxAge:86400
 });
 function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missing ${key}`);return v}
+function paymentQuote(totalMinor:number){
+ const rate=Number(process.env.PAYMENT_RUB_PER_USDT||100);
+ if(!Number.isFinite(rate)||rate<=0)throw Object.assign(new Error("Payment rate is not configured"),{statusCode:503});
+ const amountMinor=Math.max(1,Math.round((totalMinor/100/rate)*100));
+ return {currency:"USDT",amountMinor,rate};
+}
+function buildPaymentOrderUrl(orderId:string,amountMinor:number){
+ const template=process.env.PAYMENT_ORDER_URL_TEMPLATE?.trim();
+ if(!template)return null;
+ return template
+   .replaceAll("{orderId}",encodeURIComponent(orderId))
+   .replaceAll("{amount}",encodeURIComponent((amountMinor/100).toFixed(2)))
+   .replaceAll("{currency}","USDT");
+}
 const rateBuckets=new Map<string,{count:number;reset:number}>();
 function rateLimit(key:string,limit=60,windowMs=60_000){const now=Date.now();const cur=rateBuckets.get(key);if(!cur||cur.reset<=now){rateBuckets.set(key,{count:1,reset:now+windowMs});return true}if(cur.count>=limit)return false;cur.count++;return true}
 setInterval(()=>{const now=Date.now();for(const [k,v] of rateBuckets)if(v.reset<=now)rateBuckets.delete(k)},60_000).unref();
@@ -155,10 +169,33 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
    const g=groups.get(p.seller_id)||{sellerId:p.seller_id,subtotal:0,fee:0,fulfillment:p.fulfillment_type,items:[]};g.subtotal+=line;g.fee+=fee;g.items.push({...item,title:p.title,price:Number(p.price_minor)});groups.set(p.seller_id,g);
    await c.query("update inventory set reserved=reserved+$1,updated_at=now() where product_id=$2",[item.quantity,p.id]);
   }
-  await c.query("update orders set total_minor=$1,platform_fee_minor=$2,currency=$3,updated_at=now() where id=$4",[total,feeTotal,currency||'RUB',o.id]);
+  const quote=paymentQuote(total);
+  await c.query("update orders set total_minor=$1,platform_fee_minor=$2,currency=$3,payment_currency=$4,payment_amount_minor=$5,fx_rate_rub_per_payment=$6,payment_rate_locked_at=now(),updated_at=now() where id=$7",[total,feeTotal,currency||'RUB',quote.currency,quote.amountMinor,quote.rate,o.id]);
+  await c.query("insert into payments(order_id,provider,status,amount_minor,currency,payment_currency,payment_amount_minor,fx_rate_rub_per_payment) values($1,'external_order','pending',$2,'RUB',$3,$4,$5) on conflict(order_id) do update set amount_minor=excluded.amount_minor,currency=excluded.currency,payment_currency=excluded.payment_currency,payment_amount_minor=excluded.payment_amount_minor,fx_rate_rub_per_payment=excluded.fx_rate_rub_per_payment,updated_at=now()",[o.id,total,quote.currency,quote.amountMinor,quote.rate]);
   for(const g of groups.values()){const so=(await c.query(`insert into seller_orders(order_id,seller_id,subtotal_minor,platform_fee_minor,seller_amount_minor,fulfillment_type) values($1,$2,$3,$4,$3::bigint-$4::bigint,$5) returning id`,[o.id,g.sellerId,g.subtotal,g.fee,g.fulfillment])).rows[0];for(const item of g.items)await c.query("insert into order_items(seller_order_id,product_id,title_snapshot,unit_price_minor,quantity,total_minor) values($1,$2,$3,$4,$5,$6)",[so.id,item.productId,item.title,item.price,item.quantity,item.price*item.quantity]);}
-  return {id:o.id,totalMinor:total,platformFeeMinor:feeTotal};
+  return {id:o.id,totalMinor:total,platformFeeMinor:feeTotal,paymentCurrency:quote.currency,paymentAmountMinor:quote.amountMinor,fxRateRubPerPayment:quote.rate};
  }); return reply.code(201).send({order});
+});
+app.post("/api/orders/:id/payment-order",async(req,reply)=>{
+ const buyer=await auth(req);
+ const id=z.string().uuid().parse((req.params as any).id);
+ const result=await withTransaction(async(c)=>{
+   const order=(await c.query("select * from orders where id=$1 and buyer_id=$2 for update",[id,buyer.id])).rows[0];
+   if(!order)return null;
+   if(order.status!=="created")throw Object.assign(new Error("Заказ уже нельзя оплатить на этом этапе"),{statusCode:409});
+   let payment=(await c.query("select * from payments where order_id=$1 for update",[id])).rows[0];
+   if(!payment){
+     const quote=paymentQuote(Number(order.total_minor));
+     payment=(await c.query("insert into payments(order_id,provider,status,amount_minor,currency,payment_currency,payment_amount_minor,fx_rate_rub_per_payment) values($1,'external_order','pending',$2,'RUB',$3,$4,$5) returning *",[id,Number(order.total_minor),"USDT",quote.amountMinor,quote.rate])).rows[0];
+     await c.query("update orders set payment_currency=$2,payment_amount_minor=$3,fx_rate_rub_per_payment=$4,payment_rate_locked_at=now(),updated_at=now() where id=$1",[id,"USDT",quote.amountMinor,quote.rate]);
+   }
+   const url=buildPaymentOrderUrl(id,Number(payment.payment_amount_minor));
+   if(!url)return {configured:false,orderId:id,totalMinor:Number(order.total_minor),paymentCurrency:String(payment.payment_currency||"USDT"),paymentAmountMinor:Number(payment.payment_amount_minor),fxRateRubPerPayment:Number(payment.fx_rate_rub_per_payment)};
+   await c.query("update payments set invoice_link=$2,updated_at=now() where id=$1",[payment.id,url]);
+   return {configured:true,orderId:id,totalMinor:Number(order.total_minor),paymentCurrency:String(payment.payment_currency||"USDT"),paymentAmountMinor:Number(payment.payment_amount_minor),fxRateRubPerPayment:Number(payment.fx_rate_rub_per_payment),paymentUrl:url};
+ });
+ if(!result)return reply.code(404).send({error:"Order not found"});
+ return result;
 });
 app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
  const seller=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
