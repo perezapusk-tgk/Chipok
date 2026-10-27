@@ -281,3 +281,18 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
 @media(max-width:380px){
   .market-hero .market-hero-copy h1{font-size:29px!important;letter-spacing:-.048em!important}
 }
+
+/* Nookly hero — atmospheric marketplace photo background */
+.market-hero{
+  background:
+    linear-gradient(90deg,rgba(5,15,20,.96) 0%,rgba(5,15,20,.88) 42%,rgba(5,15,20,.56) 100%),
+    linear-gradient(180deg,rgba(5,15,20,.18),rgba(5,15,20,.72)),
+    url("https://images.unsplash.com/photo-1760727466768-9ba9780e3fd2?auto=format&fit=crop&fm=jpg&q=82&w=1600") center/cover no-repeat!important;
+}
+.market-hero-glow{
+  background:radial-gradient(circle,rgba(239,198,111,.22),transparent 68%)!important;
+}
+.market-hero-orb{
+  background:rgba(10,19,24,.72)!important;
+  backdrop-filter:blur(5px)!important;
+}
