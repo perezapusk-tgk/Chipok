@@ -21,7 +21,10 @@ app.setErrorHandler((error,req,reply)=>{
   const err:any=error;
   const status=Number(err.statusCode)||500;
   const safe=status>=500 ? "Internal server error" : (err.message||"Request failed");
-  reply.code(status).send({error:safe});
+  if(status===429&&err.retryAfter)reply.header("Retry-After",String(err.retryAfter));
+  const payload:any={error:safe};
+  if(status===422&&err.details)payload.details=err.details;
+  reply.code(status).send(payload);
 });
 app.addHook("onSend",async(_req,reply)=>{
  reply.header("X-Content-Type-Options","nosniff");
