@@ -366,9 +366,9 @@ app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
   const reliabilityLevelName=reliabilityLevel(reliabilityScore);
   if(reliabilityLevelName==="blocked")throw Object.assign(new Error("Продажи заблокированы из-за низкой надёжности продавца"),{statusCode:403});
   if(reliabilityLevelName==="restricted")throw Object.assign(new Error("Продажи временно ограничены: надёжность продавца ниже допустимого уровня"),{statusCode:403});
-  if(so.order_status!=="created"||so.status!=="created")throw Object.assign(new Error("Order is not awaiting seller confirmation"),{statusCode:409});
+  if(so.order_status!=="paid"||so.status!=="paid")throw Object.assign(new Error("Order is not awaiting seller confirmation"),{statusCode:409});
   await c.query("update seller_orders set status='seller_confirmed' where id=$1",[id]);
-  await c.query("insert into order_events(order_id,seller_order_id,actor_id,event_type,old_status,new_status) values($1,$2,$3,'seller_confirmed','created','seller_confirmed')",[so.order_id,id,seller.id]);
+  await c.query("insert into order_events(order_id,seller_order_id,actor_id,event_type,old_status,new_status) values($1,$2,$3,'seller_confirmed','paid','seller_confirmed')",[so.order_id,id,seller.id]);
   const pending=await c.query("select count(*)::int as n from seller_orders where order_id=$1 and status not in ('seller_confirmed','ready_for_handover','completed')",[so.order_id]);
   if(Number(pending.rows[0].n)===0)await c.query("update orders set status='seller_confirmed',updated_at=now() where id=$1",[so.order_id]);
   return {sellerOrderId:id,orderId:so.order_id,reliabilityScore,reliabilityLevel:reliabilityLevelName};
