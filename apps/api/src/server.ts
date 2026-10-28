@@ -40,47 +40,87 @@ await app.register(cors,{
  maxAge:86400
 });
 function env(key:string){const v=process.env[key];if(!v) throw new Error(`Missing ${key}`);return v}
-function paymentQuote(totalMinor:number){
- const rate=Number(process.env.PAYMENT_RUB_PER_USDT||100);
- if(!Number.isFinite(rate)||rate<=0)throw Object.assign(new Error("Payment rate is not configured"),{statusCode:503});
- const amountMinor=Math.max(1,Math.round((totalMinor/100/rate)*100));
- return {currency:"USDT",amountMinor,rate};
+const CASHERA_BASE_URL="https://api.cashera.cash/api/v1";
+function casheraApiKey(){return process.env.CASHERA_API_KEY?.trim()||""}
+function casheraSecret(){return process.env.CASHERA_API_SECRET?.trim()||""}
+function constantTimeEqual(a:string,b:string){
+ const aa=Buffer.from(a,"utf8"),bb=Buffer.from(b,"utf8");
+ if(aa.length!==bb.length)return false;
+ return timingSafeEqual(aa,bb);
 }
-function buildPaymentOrderUrl(orderId:string,amountMinor:number){
- const template=process.env.PAYMENT_ORDER_URL_TEMPLATE?.trim();
- if(!template)return null;
- return template
-   .replaceAll("{orderId}",encodeURIComponent(orderId))
-   .replaceAll("{amount}",encodeURIComponent((amountMinor/100).toFixed(2)))
-   .replaceAll("{currency}","USDT");
+function casheraCallbackUrl(){
+ const explicit=process.env.CASHERA_CALLBACK_URL?.trim();
+ const base=explicit||process.env.TELEGRAM_WEBHOOK_URL?.trim();
+ if(!base)return "";
+ return explicit||new URL("/webhooks/cashera",base).toString();
 }
-function cryptoPayToken(){return process.env.CRYPTO_PAY_API_TOKEN?.trim()||""}
-function cryptoPaySignatureValid(rawBody:string,signature:string){
- const token=cryptoPayToken(); if(!token||!signature)return false;
- const secret=createHmac("sha256","WebAppData").update(token).digest();
- const mac=createHmac("sha256",secret).update(rawBody).digest("hex");
- if(mac.length!==signature.length)return false;
- return timingSafeEqual(Buffer.from(mac,"hex"),Buffer.from(signature,"hex"));
+function casheraSuccessUrl(){
+ const explicit=process.env.CASHERA_SUCCESS_URL?.trim();
+ if(explicit)return explicit;
+ const base=process.env.TELEGRAM_WEBAPP_URL?.trim();
+ return base?new URL("/pay/ok",base).toString():"";
 }
-async function cryptoPay(method:string,body:Record<string,unknown>){
- const token=cryptoPayToken(); if(!token)throw Object.assign(new Error("Crypto Pay is not configured"),{statusCode:503});
- const r=await fetch(`https://pay.crypt.bot/api/${method}`,{method:"POST",headers:{"Crypto-Pay-API-Token":token,"Content-Type":"application/json"},body:JSON.stringify(body)});
- const data=await r.json() as any;
- if(!r.ok||!data.ok)throw Object.assign(new Error(data?.error?.name||data?.error||"Crypto Pay request failed"),{statusCode:502});
- return data.result;
+function casheraFailUrl(){
+ const explicit=process.env.CASHERA_FAIL_URL?.trim();
+ if(explicit)return explicit;
+ const base=process.env.TELEGRAM_WEBAPP_URL?.trim();
+ return base?new URL("/pay/fail",base).toString():"";
 }
-async function createCryptoPayInvoice(orderId:string,amountMinor:number){
- const amount=(amountMinor/100).toFixed(2);
- const invoice=await cryptoPay("createInvoice",{
-   asset:"USDT",
-   amount,
-   description:`Nookly order ${orderId}`,
-   payload:orderId,
-   allow_comments:false,
-   allow_anonymous:false,
-   expires_in:1800
- });
- return {invoiceId:String(invoice.invoice_id),paymentUrl:String(invoice.bot_invoice_url||invoice.mini_app_invoice_url||invoice.web_app_invoice_url||""),providerPayload:invoice};
+function validateHttpsUrl(value:string,name:string){
+ if(!value)throw Object.assign(new Error(`${name} is not configured`),{statusCode:503});
+ let u:URL;try{u=new URL(value)}catch{throw Object.assign(new Error(`${name} is invalid`),{statusCode:503})}
+ if(u.protocol!=="https:")throw Object.assign(new Error(`${name} must use HTTPS`),{statusCode:503});
+ return u.toString();
+}
+async function casheraRequest(path:string,method:"GET"|"POST",body?:Record<string,unknown>,retryExternalId?:string){
+ const key=casheraApiKey();
+ if(!key)throw Object.assign(new Error("Cashera is not configured"),{statusCode:503});
+ const payload=body===undefined?undefined:JSON.stringify(body);
+ let lastError:any;
+ for(let attempt=0;attempt<3;attempt++){
+  try{
+   const response=await fetch(CASHERA_BASE_URL+path,{method,headers:{"X-Api-Key":key,"Content-Type":"application/json","Accept":"application/json"},body:payload});
+   const text=await response.text();
+   let data:any={};try{data=text?JSON.parse(text):{}}catch{data={message:text}};
+   if(response.ok)return data;
+   const message=data?.message||data?.error||"Cashera request failed";
+   if(response.status===429){
+    const error=Object.assign(new Error(message),{statusCode:429,retryAfter:response.headers.get("retry-after")||null});
+    throw error;
+   }
+   if(response.status===401)throw Object.assign(new Error("Cashera API key rejected"),{statusCode:401});
+   if(response.status===403)throw Object.assign(new Error(message),{statusCode:403});
+   if(response.status===422)throw Object.assign(new Error(message),{statusCode:422,details:data?.errors||null});
+   if(response.status>=500){
+    lastError=Object.assign(new Error(message),{statusCode:502});
+    if(attempt<2){await new Promise(resolve=>setTimeout(resolve,250*Math.pow(2,attempt)));continue;}
+    throw lastError;
+   }
+   throw Object.assign(new Error(message),{statusCode:response.status});
+  }catch(error:any){
+   if(error?.statusCode===401||error?.statusCode===403||error?.statusCode===422||error?.statusCode===429||error?.statusCode>=400)throw error;
+   lastError=error;
+   if(attempt<2){await new Promise(resolve=>setTimeout(resolve,250*Math.pow(2,attempt)));continue;}
+  }
+ }
+ throw Object.assign(new Error(lastError?.message||"Cashera request failed"),{statusCode:502});
+}
+function casheraPaymentMethod(){
+ return process.env.CASHERA_PAYMENT_METHOD?.trim()||"sbp";
+}
+function casheraTransactionSnapshot(tx:any){
+ return {
+  uuid:tx?.uuid?String(tx.uuid):null,
+  externalId:tx?.external_id?String(tx.external_id):null,
+  status:tx?.status?String(tx.status):null,
+  amount:Number(tx?.amount||0),
+  currency:tx?.currency?String(tx.currency).toUpperCase():null,
+  createdAt:tx?.created_at||null,
+  updatedAt:tx?.updated_at||null,
+  paidAt:tx?.paid_at||null,
+  paymentUrl:tx?.payment_url||null,
+  paymentMethod:tx?.payment_method||null
+ };
 }
 const rateBuckets=new Map<string,{count:number;reset:number}>();
 function rateLimit(key:string,limit=60,windowMs=60_000){const now=Date.now();const cur=rateBuckets.get(key);if(!cur||cur.reset<=now){rateBuckets.set(key,{count:1,reset:now+windowMs});return true}if(cur.count>=limit)return false;cur.count++;return true}
@@ -125,17 +165,6 @@ async function auth(request:any){
 }
 app.get("/",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.4.0",health:"/health"}));
 app.get("/health",async()=>({ok:true,service:"chipok-api",name:"Nookly API",version:"0.4.0"}));
-async function configureCryptoPayWebhook(){
- const token=cryptoPayToken(), base=process.env.TELEGRAM_WEBHOOK_URL?.trim();
- if(!token||!base)return;
- const webhookUrl=new URL("/api/payments/cryptopay/webhook",base).toString();
- try{
-   const r=await fetch("https://pay.crypt.bot/api/setWebhook",{method:"POST",headers:{"Crypto-Pay-API-Token":token,"Content-Type":"application/json"},body:JSON.stringify({url:webhookUrl})});
-   const data=await r.json() as any;
-   if(!data.ok)app.log.warn({description:data.error},"Crypto Pay webhook registration failed");
-   else app.log.info({webhookUrl},"Crypto Pay webhook registered");
- }catch(error){app.log.warn({err:error},"Crypto Pay webhook configuration request failed")}
-}
 async function configureTelegramWebhook(){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  const secret=process.env.TELEGRAM_WEBHOOK_SECRET||process.env.TELEGRAM_PAYMENT_WEBHOOK_SECRET;
@@ -220,72 +249,108 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
 app.post("/api/orders/:id/payment-order",async(req,reply)=>{
  const buyer=await auth(req);
  const id=z.string().uuid().parse((req.params as any).id);
+ const methodBody=z.object({paymentMethod:z.string().trim().min(2).max(50).optional()}).safeParse(req.body||{});
+ const paymentMethod=methodBody.success&&methodBody.data.paymentMethod?methodBody.data.paymentMethod:casheraPaymentMethod();
  const locked=await withTransaction(async(c)=>{
    const order=(await c.query("select * from orders where id=$1 and buyer_id=$2 for update",[id,buyer.id])).rows[0];
    if(!order)return null;
    if(order.status!=="created")throw Object.assign(new Error("Заказ уже нельзя оплатить на этом этапе"),{statusCode:409});
-   if(String(order.currency).toUpperCase()!=="RUB")throw Object.assign(new Error("Only RUB orders can be paid through this checkout"),{statusCode:409});
+   if(String(order.currency).toUpperCase()!=="RUB")throw Object.assign(new Error("Only RUB orders can be paid through checkout"),{statusCode:409});
    let payment=(await c.query("select * from payments where order_id=$1 for update",[id])).rows[0];
-   if(!payment){
-     const quote=paymentQuote(Number(order.total_minor));
-     payment=(await c.query("insert into payments(order_id,provider,status,amount_minor,currency,payment_currency,payment_amount_minor,fx_rate_rub_per_payment) values($1,'cryptopay','pending',$2,'RUB',$3,$4,$5) returning *",[id,Number(order.total_minor),"USDT",quote.amountMinor,quote.rate])).rows[0];
-     await c.query("update orders set payment_currency=$2,payment_amount_minor=$3,fx_rate_rub_per_payment=$4,payment_rate_locked_at=now(),updated_at=now() where id=$1",[id,"USDT",quote.amountMinor,quote.rate]);
+   if(payment?.provider==="cashera"&&payment.provider_transaction_uuid&&payment.invoice_link){
+     return {orderId:id,paymentId:payment.id,totalMinor:Number(order.total_minor),paymentAmountMinor:Number(payment.amount_minor),currency:"RUB",providerUuid:String(payment.provider_transaction_uuid),externalId:String(payment.provider_external_id||id),paymentUrl:String(payment.invoice_link),status:String(payment.provider_status||payment.status),paymentMethod:String(payment.provider_payload?.payment_method||paymentMethod)};
    }
-   return {orderId:id,paymentId:payment.id,totalMinor:Number(order.total_minor),paymentAmountMinor:Number(payment.payment_amount_minor),fxRateRubPerPayment:Number(payment.fx_rate_rub_per_payment),invoiceId:payment.provider_invoice_id||null,paymentUrl:payment.invoice_link||null};
+   if(payment&&payment.provider!=="cashera"){
+     payment=(await c.query("update payments set provider='cashera',status='pending',amount_minor=$2,currency='RUB',invoice_link=null,provider_invoice_id=null,provider_payload=null,updated_at=now() where id=$1 returning *",[payment.id,Number(order.total_minor)])).rows[0];
+   }
+   if(!payment){
+     payment=(await c.query("insert into payments(order_id,provider,status,amount_minor,currency) values($1,'cashera','pending',$2,'RUB') returning *",[id,Number(order.total_minor)])).rows[0];
+   }
+   return {orderId:id,paymentId:payment.id,totalMinor:Number(order.total_minor),paymentAmountMinor:Number(order.total_minor),currency:"RUB",providerUuid:payment.provider_transaction_uuid?String(payment.provider_transaction_uuid):null,externalId:String(payment.provider_external_id||id),paymentUrl:payment.invoice_link||null,status:String(payment.provider_status||payment.status),paymentMethod};
  });
  if(!locked)return reply.code(404).send({error:"Order not found"});
- if(locked.paymentUrl)return {configured:true,...locked,paymentCurrency:"USDT",paymentUrl:locked.paymentUrl};
- if(!cryptoPayToken()){
-   const url=buildPaymentOrderUrl(locked.orderId,locked.paymentAmountMinor);
-   if(url){
-     await pool.query("update payments set provider='external_order',invoice_link=$2,updated_at=now() where id=$1",[locked.paymentId,url]);
-     return {configured:true,...locked,paymentCurrency:"USDT",paymentUrl:url};
-   }
-   return {configured:false,...locked,paymentCurrency:"USDT"};
- }
- const invoice=await createCryptoPayInvoice(locked.orderId,locked.paymentAmountMinor);
- const saved=await pool.query("update payments set provider='cryptopay',provider_invoice_id=$2,provider_payment_id=$2,invoice_link=$3,provider_payload=$4,updated_at=now() where id=$1 and provider_invoice_id is null returning *",[locked.paymentId,invoice.invoiceId,invoice.paymentUrl,JSON.stringify(invoice.providerPayload)]);
- if(!saved.rowCount){
-   const existing=(await pool.query("select invoice_link,provider_invoice_id from payments where id=$1",[locked.paymentId])).rows[0];
-   return {configured:true,...locked,paymentCurrency:"USDT",paymentUrl:existing?.invoice_link||invoice.paymentUrl,invoiceId:existing?.provider_invoice_id||invoice.invoiceId};
- }
- return {configured:true,...locked,paymentCurrency:"USDT",paymentUrl:invoice.paymentUrl,invoiceId:invoice.invoiceId};
+ if(locked.paymentUrl)return {configured:true,...locked};
+ validateHttpsUrl(casheraCallbackUrl(),"CASHERA_CALLBACK_URL");
+ const successUrl=validateHttpsUrl(casheraSuccessUrl(),"CASHERA_SUCCESS_URL");
+ const failUrl=validateHttpsUrl(casheraFailUrl(),"CASHERA_FAIL_URL");
+ const externalId=locked.externalId;
+ const tx=await casheraRequest("/integration/transactions","POST",{
+   amount:locked.paymentAmountMinor,
+   currency:"RUB",
+   payment_method:locked.paymentMethod,
+   external_id:externalId,
+   description:`Nookly order ${locked.orderId}`,
+   callback_url:casheraCallbackUrl(),
+   success_url:successUrl,
+   fail_url:failUrl
+ },externalId);
+ const snap=casheraTransactionSnapshot(tx);
+ if(!snap.uuid||!snap.paymentUrl)throw Object.assign(new Error("Cashera did not return transaction uuid/payment_url"),{statusCode:502});
+ const saved=await pool.query(`update payments set provider='cashera',provider_payment_id=$2,provider_invoice_id=$2,provider_external_id=$3,provider_transaction_uuid=$2,provider_status=$4,provider_paid_at=$5,provider_created_at=$6,provider_updated_at=$7,amount_minor=$8,currency='RUB',invoice_link=$9,provider_payload=$10,updated_at=now() where id=$1 returning *`,[locked.paymentId,snap.uuid,snap.externalId||externalId,snap.status,snap.paidAt,snap.createdAt,snap.updatedAt,snap.amount,snap.paymentUrl,JSON.stringify(tx)]);
+ return {configured:true,orderId:locked.orderId,paymentId:locked.paymentId,totalMinor:locked.totalMinor,paymentAmountMinor:locked.paymentAmountMinor,currency:"RUB",providerUuid:snap.uuid,externalId:snap.externalId||externalId,paymentUrl:snap.paymentUrl,status:snap.status,paymentMethod:snap.paymentMethod||locked.paymentMethod};
 });
 
-app.post("/api/payments/cryptopay/webhook",async(req:any,reply)=>{
- const signature=String(req.headers["crypto-pay-api-signature"]||"");
- const rawBody=String(req.rawBody||JSON.stringify(req.body));
- if(!cryptoPaySignatureValid(rawBody,signature))return reply.code(401).send({error:"Invalid webhook signature"});
- const update=req.body as any;
- if(update?.update_type!=="invoice_paid"||!update?.payload)return {ok:true};
- const invoice=update.payload;
- const invoiceId=String(invoice.invoice_id||"");
- const orderId=String(invoice.payload||"");
- if(!invoiceId||!orderId)return {ok:true};
- let verified:any;
- try{
-   const rows=await cryptoPay("getInvoices",{invoice_ids:[Number(invoiceId)]});
-   verified=Array.isArray(rows)&&rows.length?rows[0]:null;
- }catch(error){req.log.error({err:error},"Crypto Pay invoice verification failed");return reply.code(502).send({error:"Payment verification failed"});}
- if(!verified||String(verified.status)!=="paid"||String(verified.asset)!=="USDT")return reply.code(409).send({error:"Invoice is not confirmed"});
- const paidMinor=Math.round(Number(verified.amount)*100);
- const result=await withTransaction(async(c)=>{
-   const payment=(await c.query("select p.*,o.buyer_id,o.status as order_status,o.total_minor,o.payment_amount_minor from payments p join orders o on o.id=p.order_id where p.provider_invoice_id=$1 and p.order_id=$2 for update",[invoiceId,orderId])).rows[0];
-   if(!payment)return null;
-   if(Number(payment.payment_amount_minor)!==paidMinor)throw Object.assign(new Error("Paid amount does not match the order"),{statusCode:409});
-   if(payment.status==="paid")return {alreadyPaid:true,orderId:payment.order_id};
-   await c.query("insert into payment_transactions(payment_id,idempotency_key,provider_event_id,event_type,payload) values($1,$2,$3,'invoice_paid',$4) on conflict(idempotency_key) do nothing",[payment.id,`cryptopay:invoice:${invoiceId}`,String(update.update_id||invoiceId),JSON.stringify(update)]);
-   await c.query("update payments set status='paid',updated_at=now() where id=$1",[payment.id]);
-   await c.query("update seller_orders set status='paid' where order_id=$1 and status='created'",[payment.order_id]);
-   await c.query("update orders set status='paid',updated_at=now() where id=$1 and status='created'",[payment.order_id]);
-   await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_paid','Оплата подтверждена',$2)",[payment.buyer_id,`Заказ оплачен: ${(Number(payment.total_minor)/100).toFixed(2)} ₽. Продавец получил уведомление.`]);
-   await c.query("insert into notifications(user_id,type,title,body) select so.seller_id,'new_paid_order','Новый оплаченный заказ',$2 from seller_orders so where so.order_id=$1",[payment.order_id,`Получена оплата за заказ на ${(Number(payment.total_minor)/100).toFixed(2)} ₽. Подтвердите наличие товара.`]);
-   return {alreadyPaid:false,orderId:payment.order_id};
+async function applyCasheraTransactionStatus(tx:any,sourcePayload?:unknown){
+ const snap=casheraTransactionSnapshot(tx);
+ if(!snap.uuid||!snap.externalId||!snap.status)return {ok:true,ignored:true};
+ return withTransaction(async(c)=>{
+   const payment=(await c.query("select p.*,o.buyer_id,o.status as order_status,o.total_minor,o.currency as order_currency from payments p join orders o on o.id=p.order_id where p.provider='cashera' and p.provider_external_id=$1 for update",[snap.externalId])).rows[0];
+   if(!payment)return {ok:true,ignored:true,reason:"unknown_external_id"};
+   const eventKey=`cashera:${snap.uuid}:${snap.status}`;
+   const seen=await c.query("select 1 from payment_transactions where idempotency_key=$1",[eventKey]);
+   if(seen.rowCount)return {ok:true,alreadyProcessed:true};
+   await c.query("insert into payment_transactions(payment_id,idempotency_key,provider_event_id,event_type,payload) values($1,$2,$3,'transaction.status_updated',$4)",[payment.id,eventKey,eventKey,JSON.stringify(sourcePayload||tx)]);
+   await c.query("update payments set provider_payment_id=$2,provider_invoice_id=$2,provider_transaction_uuid=$2,provider_status=$3,provider_paid_at=$4,provider_created_at=coalesce(provider_created_at,$5),provider_updated_at=$6,amount_minor=$7,currency=$8,status=case when $3 in ('paid','refunded','chargeback','canceled','failed','expired') then $3 else status end,updated_at=now() where id=$1",[payment.id,snap.uuid,snap.status,snap.paidAt,snap.createdAt,snap.updatedAt,snap.amount,snap.currency]);
+   if(snap.status==="paid"){
+     if(snap.currency!=="RUB"||snap.amount!==Number(payment.total_minor))throw Object.assign(new Error("Cashera paid amount/currency mismatch"),{statusCode:409});
+     if(payment.order_status==="created"){
+       await c.query("update seller_orders set status='paid' where order_id=$1 and status='created'",[payment.order_id]);
+       await c.query("update orders set status='paid',updated_at=now() where id=$1 and status='created'",[payment.order_id]);
+       await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_paid','Оплата подтверждена',$2)",[payment.buyer_id,`Заказ оплачен: ${(Number(payment.total_minor)/100).toFixed(2)} ₽. Продавец получил уведомление.`]);
+       await c.query("insert into notifications(user_id,type,title,body) select so.seller_id,'new_paid_order','Новый оплаченный заказ',$2 from seller_orders so where so.order_id=$1",[payment.order_id,`Получена оплата за заказ на ${(Number(payment.total_minor)/100).toFixed(2)} ₽. Подтвердите наличие товара.`]);
+     } else if(["cancelled","refunded","disputed"].includes(payment.order_status)){
+       await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_paid_late','Оплата подтверждена после изменения заказа',$2)",[payment.buyer_id,`Cashera подтвердил оплату заказа ${payment.order_id}, но заказ уже имеет статус «${payment.order_status}». Обратитесь в поддержку для сверки.`]);
+     }
+   } else if(["refunded","chargeback"].includes(snap.status)){
+     if(payment.order_status!=="refunded")await c.query("update orders set status=case when $2='refunded' then 'refunded' else 'disputed' end,updated_at=now() where id=$1",[payment.order_id,snap.status]);
+     await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_reversed','Статус оплаты изменён',$2)",[payment.buyer_id,`Cashera сообщил статус «${snap.status}» для заказа ${payment.order_id}. Выплата продавцу требует сверки.`]);
+   }
+   return {ok:true,status:snap.status,orderId:payment.order_id};
  });
- if(!result)return reply.code(404).send({error:"Payment/order not found"});
- return {ok:true,...result};
+}
+
+app.post("/webhooks/cashera",async(req:any,reply)=>{
+ const apiKey=String(req.headers["x-api-key"]||"");
+ const secret=String(req.headers["x-secret"]||"");
+ if(!constantTimeEqual(apiKey,casheraApiKey())||!constantTimeEqual(secret,casheraSecret()))return reply.code(401).send({error:"Unauthorized"});
+ const body=req.body as any;
+ if(body?.event!=="transaction.status_updated")return reply.code(200).send({ok:true});
+ try{
+   const tx=body.transaction;
+   if(tx?.status==="paid"){
+     const externalId=String(tx?.external_id||"");
+     const expected=(await pool.query("select amount_minor,currency,provider_transaction_uuid from payments where provider='cashera' and provider_external_id=$1",[externalId])).rows[0];
+     if(!expected)return reply.code(200).send({ok:true});
+     if(Number(expected.amount_minor)!==Number(tx.amount)||String(expected.currency).toUpperCase()!==String(tx.currency).toUpperCase())return reply.code(200).send({ok:true});
+   }
+   await applyCasheraTransactionStatus(body.transaction,body);
+ }catch(error:any){
+   if(error?.statusCode===409)app.log.warn({error:"Cashera payment rejected by validation"},"Cashera webhook business validation failed");
+   else app.log.error({err:error},"Cashera webhook processing failed");
+ }
+ return reply.code(200).send({ok:true});
 });
-app.get("/api/payments/cryptopay/webhook",async()=>({ok:true,route:"cryptopay-webhook",method:"POST"}));
+app.get("/api/admin/payments/:orderId/cashera-status",async(req,reply)=>{
+ const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
+ const orderId=z.string().uuid().parse((req.params as any).orderId);
+ const local=(await pool.query("select p.provider_transaction_uuid,p.provider_external_id,o.total_minor,o.currency from payments p join orders o on o.id=p.order_id where p.order_id=$1 and p.provider='cashera'",[orderId])).rows[0];
+ if(!local)return reply.code(404).send({error:"Cashera payment not found"});
+ const tx=local.provider_transaction_uuid?await casheraRequest(`/integration/transactions/${encodeURIComponent(local.provider_transaction_uuid)}`,"GET"):await casheraRequest(`/integration/transactions/by-external-id/${encodeURIComponent(local.provider_external_id)}`,"GET");
+ const snap=casheraTransactionSnapshot(tx);
+ await applyCasheraTransactionStatus(tx);
+ return {transaction:snap,orderId,expectedAmountMinor:Number(local.total_minor),expectedCurrency:String(local.currency).toUpperCase()};
+});
+app.get("/webhooks/cashera",async()=>({ok:true,route:"cashera-webhook",method:"POST"}));
 
 app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
  const seller=await auth(req);const id=z.string().uuid().parse((req.params as any).id);
@@ -724,7 +789,7 @@ let bootPromise:Promise<void>|null=null;
 export async function bootstrap(){
  if(!bootPromise)bootPromise=(async()=>{
   await runMigrations();
-  await configureTelegramWebhook().catch(error=>app.log.error(error,"Failed to configure Telegram webhook"));\n  await configureCryptoPayWebhook().catch(error=>app.log.error(error,"Failed to configure Crypto Pay webhook"));
+  await configureTelegramWebhook().catch(error=>app.log.error(error,"Failed to configure Telegram webhook"));\n
  })();
  return bootPromise;
 }
