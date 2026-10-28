@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { z } from "zod";
-import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv, createHmac, timingSafeEqual } from "node:crypto";
+import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv, timingSafeEqual } from "node:crypto";
 import { pool, withTransaction } from "./db.js";
 import { validateTelegramInitData } from "./telegram.js";
 import { OrderService } from "./services/order-service.js";
@@ -72,7 +72,7 @@ function validateHttpsUrl(value:string,name:string){
  if(u.protocol!=="https:")throw Object.assign(new Error(`${name} must use HTTPS`),{statusCode:503});
  return u.toString();
 }
-async function casheraRequest(path:string,method:"GET"|"POST",body?:Record<string,unknown>,retryExternalId?:string){
+async function casheraRequest(path:string,method:"GET"|"POST",body?:Record<string,unknown>){
  const key=casheraApiKey();
  if(!key)throw Object.assign(new Error("Cashera is not configured"),{statusCode:503});
  const payload=body===undefined?undefined:JSON.stringify(body);
@@ -239,11 +239,10 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
    const g=groups.get(p.seller_id)||{sellerId:p.seller_id,subtotal:0,fee:0,fulfillment:p.fulfillment_type,items:[]};g.subtotal+=line;g.fee+=fee;g.items.push({...item,title:p.title,price:Number(p.price_minor)});groups.set(p.seller_id,g);
    await c.query("update inventory set reserved=reserved+$1,updated_at=now() where product_id=$2",[item.quantity,p.id]);
   }
-  const quote=paymentQuote(total);
-  await c.query("update orders set total_minor=$1,platform_fee_minor=$2,currency=$3,payment_currency=$4,payment_amount_minor=$5,fx_rate_rub_per_payment=$6,payment_rate_locked_at=now(),updated_at=now() where id=$7",[total,feeTotal,currency||'RUB',quote.currency,quote.amountMinor,quote.rate,o.id]);
-  await c.query("insert into payments(order_id,provider,status,amount_minor,currency,payment_currency,payment_amount_minor,fx_rate_rub_per_payment) values($1,'external_order','pending',$2,'RUB',$3,$4,$5) on conflict(order_id) do update set amount_minor=excluded.amount_minor,currency=excluded.currency,payment_currency=excluded.payment_currency,payment_amount_minor=excluded.payment_amount_minor,fx_rate_rub_per_payment=excluded.fx_rate_rub_per_payment,updated_at=now()",[o.id,total,quote.currency,quote.amountMinor,quote.rate]);
+  await c.query("update orders set total_minor=$1,platform_fee_minor=$2,currency=$3,payment_currency=null,payment_amount_minor=null,fx_rate_rub_per_payment=null,payment_rate_locked_at=null,updated_at=now() where id=$4",[total,feeTotal,currency||'RUB',o.id]);
+  await c.query("insert into payments(order_id,provider,status,amount_minor,currency) values($1,'cashera','pending',$2,'RUB') on conflict(order_id) do update set provider='cashera',status='pending',amount_minor=excluded.amount_minor,currency='RUB',updated_at=now()",[o.id,total]);
   for(const g of groups.values()){const so=(await c.query(`insert into seller_orders(order_id,seller_id,subtotal_minor,platform_fee_minor,seller_amount_minor,fulfillment_type) values($1,$2,$3,$4,$3::bigint-$4::bigint,$5) returning id`,[o.id,g.sellerId,g.subtotal,g.fee,g.fulfillment])).rows[0];for(const item of g.items)await c.query("insert into order_items(seller_order_id,product_id,title_snapshot,unit_price_minor,quantity,total_minor) values($1,$2,$3,$4,$5,$6)",[so.id,item.productId,item.title,item.price,item.quantity,item.price*item.quantity]);}
-  return {id:o.id,totalMinor:total,platformFeeMinor:feeTotal,paymentCurrency:quote.currency,paymentAmountMinor:quote.amountMinor,fxRateRubPerPayment:quote.rate};
+  return {id:o.id,totalMinor:total,platformFeeMinor:feeTotal,paymentCurrency:"RUB",paymentAmountMinor:total,fxRateRubPerPayment:null};
  }); return reply.code(201).send({order});
 });
 app.post("/api/orders/:id/payment-order",async(req,reply)=>{
@@ -322,7 +321,7 @@ async function applyCasheraTransactionStatus(tx:any,sourcePayload?:unknown){
 app.post("/webhooks/cashera",async(req:any,reply)=>{
  const apiKey=String(req.headers["x-api-key"]||"");
  const secret=String(req.headers["x-secret"]||"");
- if(!constantTimeEqual(apiKey,casheraApiKey())||!constantTimeEqual(secret,casheraSecret()))return reply.code(401).send({error:"Unauthorized"});
+ if(!apiKey||!secret||!constantTimeEqual(apiKey,casheraApiKey())||!constantTimeEqual(secret,casheraSecret()))return reply.code(401).send({error:"Unauthorized"});
  const body=req.body as any;
  if(body?.event!=="transaction.status_updated")return reply.code(200).send({ok:true});
  try{
