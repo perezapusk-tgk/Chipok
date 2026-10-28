@@ -109,7 +109,7 @@ async function casheraRequest(path:string,method:"GET"|"POST",body?:Record<strin
  throw Object.assign(new Error(lastError?.message||"Cashera request failed"),{statusCode:502});
 }
 function casheraPaymentMethod(){
- return process.env.CASHERA_PAYMENT_METHOD?.trim()||"sbp";
+ return process.env.CASHERA_PAYMENT_METHOD?.trim()||"";
 }
 function casheraTransactionSnapshot(tx:any){
  return {
@@ -279,13 +279,13 @@ app.post("/api/orders/:id/payment-order",async(req,reply)=>{
  const tx=await casheraRequest("/integration/transactions","POST",{
    amount:locked.paymentAmountMinor,
    currency:"RUB",
-   payment_method:locked.paymentMethod,
+   ...(locked.paymentMethod?{payment_method:locked.paymentMethod}:{}),
    external_id:externalId,
    description:`Nookly order ${locked.orderId}`,
    callback_url:casheraCallbackUrl(),
    success_url:successUrl,
    fail_url:failUrl
- },externalId);
+ });
  const snap=casheraTransactionSnapshot(tx);
  if(!snap.uuid||!snap.paymentUrl)throw Object.assign(new Error("Cashera did not return transaction uuid/payment_url"),{statusCode:502});
  const saved=await pool.query(`update payments set provider='cashera',provider_payment_id=$2,provider_invoice_id=$2,provider_external_id=$3,provider_transaction_uuid=$2,provider_status=$4,provider_paid_at=$5,provider_created_at=$6,provider_updated_at=$7,amount_minor=$8,currency='RUB',invoice_link=$9,provider_payload=$10,updated_at=now() where id=$1 returning *`,[locked.paymentId,snap.uuid,snap.externalId||externalId,snap.status,snap.paidAt,snap.createdAt,snap.updatedAt,snap.amount,snap.paymentUrl,JSON.stringify(tx)]);
