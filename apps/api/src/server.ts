@@ -352,6 +352,8 @@ app.get("/api/admin/payments/:orderId/cashera-status",async(req,reply)=>{
  await applyCasheraTransactionStatus(tx);
  return {transaction:snap,orderId,expectedAmountMinor:Number(local.total_minor),expectedCurrency:String(local.currency).toUpperCase()};
 });
+app.get("/pay/ok",async(_req,reply)=>{const target=process.env.TELEGRAM_WEBAPP_URL?.trim();if(target)return reply.redirect(target);return reply.type("text/html").send("<!doctype html><title>Nookly</title><p>Оплата завершена. Вернитесь в Nookly.</p>");});
+app.get("/pay/fail",async(_req,reply)=>{const target=process.env.TELEGRAM_WEBAPP_URL?.trim();if(target)return reply.redirect(target);return reply.type("text/html").send("<!doctype html><title>Nookly</title><p>Оплата не завершена. Вернитесь в Nookly и попробуйте снова.</p>");});
 app.get("/webhooks/cashera",async()=>({ok:true,route:"cashera-webhook",method:"POST"}));
 
 app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
