@@ -793,7 +793,8 @@ let bootPromise:Promise<void>|null=null;
 export async function bootstrap(){
  if(!bootPromise)bootPromise=(async()=>{
   await runMigrations();
-  await configureTelegramWebhook().catch(error=>app.log.error(error,"Failed to configure Telegram webhook"));\n
+  await configureTelegramWebhook().catch(error=>app.log.error(error,"Failed to configure Telegram webhook"));
+
  })();
  return bootPromise;
 }
