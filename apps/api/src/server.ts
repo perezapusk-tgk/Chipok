@@ -5,6 +5,52 @@ import { randomUUID, createHash, randomInt, createCipheriv, createDecipheriv, ti
 import { pool, withTransaction } from "./db.js";
 import { validateTelegramInitData } from "./telegram.js";
 import { OrderService } from "./services/order-service.js";
+
+type OrderTelegramEvent="created"|"paid"|"seller_confirmed"|"seller_cancelled"|"ready"|"completed"|"expired";
+async function notifyOrderTelegram(orderId:string,event:OrderTelegramEvent,sellerOrderId?:string){
+ try{
+  const result=await pool.query(`
+   select o.id,o.total_minor,o.currency,o.status,
+          bu.telegram_id as buyer_telegram_id,bu.first_name as buyer_name,
+          so.id as seller_order_id,so.seller_id,so.subtotal_minor,so.status as seller_status,
+          su.telegram_id as seller_telegram_id,coalesce(st.name,sp.display_name,su.first_name,'Магазин') as store_name,
+          coalesce((select string_agg(oi.title_snapshot||' × '||oi.quantity, E'\\n' order by oi.created_at),'' ) as items
+     from orders o join users bu on bu.id=o.buyer_id
+     join seller_orders so on so.order_id=o.id join users su on su.id=so.seller_id
+     left join stores st on st.seller_id=so.seller_id
+     left join seller_profiles sp on sp.user_id=so.seller_id
+     left join lateral(select string_agg(oi.title_snapshot||' × '||oi.quantity, E'\\n' order by oi.created_at) as items from order_items oi where oi.seller_order_id=so.id) lines on true
+    where o.id=$1 and ($2::uuid is null or so.id=$2)
+    order by so.created_at
+  `,[orderId,sellerOrderId||null]);
+  const rows=result.rows as any[];if(!rows.length)return;
+  const first=rows[0],shortId=String(orderId).slice(0,8).toUpperCase();
+  const money=(n:number)=>((Number(n)||0)/100).toFixed(2)+" ₽";
+  const itemLines=(r:any)=>r.items||"Состав заказа уточняется";
+  const send=async(chatId:any,message:string)=>{if(chatId)try{await telegramSendMessage(chatId,message)}catch(error){app.log.warn({err:error,orderId,event},"Telegram order notification failed")}};
+  if(event==="created"){
+   const allItems=rows.map(r=>r.store_name+":\n"+itemLines(r)).join("\n\n");
+   await send(first.buyer_telegram_id,"🛍 Заказ оформлен!\nЗаказ №"+shortId+"\n\n"+allItems+"\n\nСумма: "+money(first.total_minor)+"\n\nОжидайте подтверждения продавца в Nookly.");
+   for(const r of rows)await send(r.seller_telegram_id,"🆕 Новый заказ!\nЗаказ №"+shortId+"\nМагазин: "+r.store_name+"\n\n"+itemLines(r)+"\n\nСумма ваших товаров: "+money(r.subtotal_minor)+"\nПокупатель: "+(first.buyer_name||"Покупатель")+"\n\nОткройте Nookly → Заказы и подтвердите наличие товара.");
+   return;
+  }
+  for(const r of rows){
+   if(event==="paid")await send(r.seller_telegram_id,"💳 Покупатель отметил оплату заказа №"+shortId+".\nМагазин: "+r.store_name+"\n"+itemLines(r)+"\n\nПроверьте поступление денег и подтвердите заказ в Nookly.");
+   if(event==="seller_confirmed")await send(first.buyer_telegram_id,"✅ Продавец подтвердил заказ №"+shortId+".\nМагазин: "+r.store_name+"\n"+itemLines(r)+"\n\nОжидайте уведомления о готовности к получению.");
+   if(event==="seller_cancelled")await send(first.buyer_telegram_id,"⚠️ Продавец отменил заказ №"+shortId+".\nМагазин: "+r.store_name+"\nЗаказ передан на рассмотрение возврата. Подробности доступны в Nookly.");
+   if(event==="ready")await send(first.buyer_telegram_id,"📦 Заказ №"+shortId+" готов к получению!\nМагазин: "+r.store_name+"\n"+itemLines(r)+"\n\nОткройте раздел «Заказы» в Nookly, чтобы посмотреть код получения.");
+   if(event==="completed"){
+    await send(first.buyer_telegram_id,"🎉 Заказ №"+shortId+" завершён.\nМагазин: "+r.store_name+"\nСпасибо за покупку в Nookly!");
+    await send(r.seller_telegram_id,"🎉 Заказ №"+shortId+" успешно завершён.\n"+itemLines(r)+"\nПродажа учтена в статистике магазина.");
+   }
+   if(event==="expired"){
+    await send(r.seller_telegram_id,"⌛ Заказ №"+shortId+" отменён: покупатель не подтвердил оплату вовремя. Резерв товара снят.");
+   }
+  }
+  if(event==="expired")await send(first.buyer_telegram_id,"⌛ Заказ №"+shortId+" отменён: время ожидания оплаты истекло. Резерв товара снят.");
+ }catch(error){app.log.warn({err:error,orderId,event},"Unable to prepare Telegram order notification")}
+}
+
 async function telegramSendMessage(chatId:number|string,text:string,replyMarkup?:Record<string,unknown>){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  if(!token)return;
@@ -252,7 +298,7 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
   // Product payments are settled directly between buyer and seller.
   for(const g of groups.values()){const so=(await c.query(`insert into seller_orders(order_id,seller_id,subtotal_minor,platform_fee_minor,seller_amount_minor,fulfillment_type) values($1,$2,$3,0,$3,$4) returning id`,[o.id,g.sellerId,g.subtotal,g.fulfillment])).rows[0];for(const item of g.items)await c.query("insert into order_items(seller_order_id,product_id,title_snapshot,unit_price_minor,quantity,total_minor) values($1,$2,$3,$4,$5,$6)",[so.id,item.productId,item.title,item.price,item.quantity,item.price*item.quantity]);}
   return {id:o.id,totalMinor:total,platformFeeMinor:0,paymentRequired:false,settlement:"direct_with_seller"};
- }); return reply.code(201).send({order});
+ }); await notifyOrderTelegram(order.id,"created"); return reply.code(201).send({order});
 });
 app.post("/api/orders/:id/confirm-direct-payment",async(req,reply)=>{
  const buyer=await auth(req);
@@ -269,6 +315,7 @@ app.post("/api/orders/:id/confirm-direct-payment",async(req,reply)=>{
   return {id,status:"paid"};
  });
  if(!result)return reply.code(404).send({error:"Заказ не найден"});
+ await notifyOrderTelegram(id,"paid");
  return result;
 });
 app.post("/api/orders/:id/payment-order",async(req,reply)=>{
@@ -303,6 +350,7 @@ app.post("/api/seller-orders/:id/confirm",async(req,reply)=>{
   return {sellerOrderId:id,orderId:so.order_id,reliabilityScore,reliabilityLevel:reliabilityLevelName};
  });
  if(!result)return reply.code(404).send({error:"Seller order not found"});
+ await notifyOrderTelegram(result.orderId,"seller_confirmed",id);
  return result;
 });
 
@@ -328,6 +376,7 @@ app.post("/api/seller-orders/:id/reject",async(req,reply)=>{
   return {sellerOrderId:id,orderId:so.order_id,status:"cancelled",reliabilityScore:scoreNumber,reliabilityLevel:level};
  });
  if(!result)return reply.code(404).send({error:"Seller order not found"});
+ await notifyOrderTelegram(result.orderId,"seller_cancelled",id);
  return result;
 });
 app.post("/api/seller-orders/:id/ready",async(req,reply)=>{
@@ -348,6 +397,7 @@ app.post("/api/seller-orders/:id/ready",async(req,reply)=>{
   return {sellerOrderId:id,orderId:so.order_id,status:"ready_for_handover"};
  });
  if(!result)return reply.code(404).send({error:"Seller order not found"});
+ await notifyOrderTelegram(result.orderId,"ready",id);
  return result;
 });
 app.get("/api/orders/:id/handover",async(req,reply)=>{
@@ -369,6 +419,7 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
    });
  });
  if(!result)return reply.code(404).send({error:"Seller order not found"});
+ await notifyOrderTelegram(result.orderId,"completed",id);
  return result;
 });
 
