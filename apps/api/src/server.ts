@@ -245,7 +245,7 @@ async function configureTelegramWebhook(){
    }
    app.log.info({webhookUrl},"Telegram webhook registered");
   }
-  const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть Nookly"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь и документы"},{command:"terms",description:"Пользовательское соглашение"},{command:"privacy",description:"Политика конфиденциальности"},{command:"support",description:"Техническая поддержка"},{command:"requisites",description:"Реквизиты оплаты подписки"}]})});
+  const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть Nookly"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь и документы"},{command:"terms",description:"Пользовательское соглашение"},{command:"privacy",description:"Политика конфиденциальности"},{command:"support",description:"Техническая поддержка"},{command:"requisites",description:"Как оплатить товар продавцу"}]})});
   const commandsData=await commands.json() as {ok:boolean;description?:string};
   if(!commandsData.ok)app.log.warn({description:commandsData.description},"Telegram commands registration failed");
   const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
