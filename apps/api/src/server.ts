@@ -310,8 +310,8 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
  }); await notifyOrderTelegram(order.id,"created"); return reply.code(201).send({order});
 });
 app.post("/api/orders/:id/confirm-direct-payment",async(req,reply)=>{
- await expireUnpaidOrders();
  const buyer=await auth(req);
+ await expireUnpaidOrders();
  const id=z.string().uuid().parse((req.params as any).id);
  const result=await withTransaction(async(c)=>{
   const order=(await c.query("select id,status from orders where id=$1 and buyer_id=$2 for update",[id,buyer.id])).rows[0];
@@ -729,8 +729,8 @@ app.post("/api/admin/refunds/:id/resolve",async(req,reply)=>{
 
 app.get("/api/admin/moderation",async(req,reply)=>{const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});const r=await pool.query(`select m.id,m.status,m.reason,m.created_at,p.id as product_id,p.title,p.price_minor,p.currency,u.first_name as seller_name from moderation_queue m join products p on p.id=m.product_id join users u on u.id=p.seller_id where m.status='pending' order by m.created_at asc`);return {items:r.rows};});
 app.get("/api/orders",async(req)=>{
- await expireUnpaidOrders();
  const buyer=await auth(req);
+ await expireUnpaidOrders();
  const r=await pool.query(`select o.id,o.status,o.total_minor,o.currency,o.platform_fee_minor,o.created_at,
  coalesce(json_agg(json_build_object(
  'id',so.id,'seller_id',so.seller_id,'status',so.status,'subtotal_minor',so.subtotal_minor,
