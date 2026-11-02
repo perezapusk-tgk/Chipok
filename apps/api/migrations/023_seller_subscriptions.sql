@@ -23,7 +23,7 @@ create table if not exists seller_subscription_promotions (
  created_at timestamptz not null default now()
 );
 insert into seller_subscription_promotions(code,discount_amount_minor,max_redemptions)
-values('START99',9900,20) on conflict(code) do nothing;
+values('START99',9900,5) on conflict(code) do update set max_redemptions=5,active=true;
 insert into seller_subscriptions(user_id,plan,status,amount_minor,payment_method,starts_at,expires_at)
 select sp.user_id,'standard','active',0,'grandfathered',now(),now()+interval '30 days'
 from seller_profiles sp
