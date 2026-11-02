@@ -293,8 +293,10 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
    if(!p)throw Object.assign(new Error("Product unavailable"),{statusCode:409});
    if(String(p.currency).toUpperCase()!=="RUB")throw Object.assign(new Error("Nookly accepts only RUB catalog prices"),{statusCode:409});
    if(String(p.seller_id)===String(buyer.id))throw Object.assign(new Error("Нельзя купить собственный товар"),{statusCode:409});
-   const sellerProfile=(await c.query("select reliability_score from seller_profiles where user_id=$1",[p.seller_id])).rows[0];
+   const sellerProfile=(await c.query("select reliability_score,payment_method,payment_details,payment_link from seller_profiles where user_id=$1",[p.seller_id])).rows[0];
    const sellerReliability=Number(sellerProfile?.reliability_score ?? 0);
+   const paymentConfigured=sellerProfile?.payment_method==="link"?Boolean(sellerProfile?.payment_link):Boolean(String(sellerProfile?.payment_details||"").trim());
+   if(!paymentConfigured)throw Object.assign(new Error("Продавец ещё не настроил способ получения оплаты. Выберите другой товар или попробуйте позже."),{statusCode:409});
    if(p.role!=="seller" || sellerReliability<60 || !await activeSellerSubscription(p.seller_id,c))throw Object.assign(new Error("Продавец временно недоступен: подписка не активна или продажи ограничены"),{statusCode:409});
    if(p.stock-p.reserved<item.quantity)throw Object.assign(new Error("Insufficient stock"),{statusCode:409});
    if(currency===null)currency=p.currency;else if(currency!==p.currency)throw Object.assign(new Error('All items in one order must use the same currency'),{statusCode:409}); const line=Number(p.price_minor)*item.quantity,fee=Math.floor(line*bps/10000);total+=line;feeTotal+=fee;
@@ -308,6 +310,7 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
  }); await notifyOrderTelegram(order.id,"created"); return reply.code(201).send({order});
 });
 app.post("/api/orders/:id/confirm-direct-payment",async(req,reply)=>{
+ await expireUnpaidOrders();
  const buyer=await auth(req);
  const id=z.string().uuid().parse((req.params as any).id);
  const result=await withTransaction(async(c)=>{
@@ -726,6 +729,7 @@ app.post("/api/admin/refunds/:id/resolve",async(req,reply)=>{
 
 app.get("/api/admin/moderation",async(req,reply)=>{const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});const r=await pool.query(`select m.id,m.status,m.reason,m.created_at,p.id as product_id,p.title,p.price_minor,p.currency,u.first_name as seller_name from moderation_queue m join products p on p.id=m.product_id join users u on u.id=p.seller_id where m.status='pending' order by m.created_at asc`);return {items:r.rows};});
 app.get("/api/orders",async(req)=>{
+ await expireUnpaidOrders();
  const buyer=await auth(req);
  const r=await pool.query(`select o.id,o.status,o.total_minor,o.currency,o.platform_fee_minor,o.created_at,
  coalesce(json_agg(json_build_object(
