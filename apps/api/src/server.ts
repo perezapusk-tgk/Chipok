@@ -248,11 +248,28 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
    const g=groups.get(p.seller_id)||{sellerId:p.seller_id,subtotal:0,fee:0,fulfillment:p.fulfillment_type,items:[]};g.subtotal+=line;g.fee+=fee;g.items.push({...item,title:p.title,price:Number(p.price_minor)});groups.set(p.seller_id,g);
    await c.query("update inventory set reserved=reserved+$1,updated_at=now() where product_id=$2",[item.quantity,p.id]);
   }
-  await c.query("update orders set status='paid',total_minor=$1,platform_fee_minor=0,currency=$2,payment_currency=null,payment_amount_minor=null,fx_rate_rub_per_payment=null,payment_rate_locked_at=null,updated_at=now() where id=$3",[total,currency||'RUB',o.id]);
+  await c.query("update orders set total_minor=$1,platform_fee_minor=0,currency=$2,payment_currency=null,payment_amount_minor=null,fx_rate_rub_per_payment=null,payment_rate_locked_at=null,updated_at=now() where id=$3",[total,currency||'RUB',o.id]);
   // Product payments are settled directly between buyer and seller.
-  for(const g of groups.values()){const so=(await c.query(`insert into seller_orders(order_id,seller_id,subtotal_minor,platform_fee_minor,seller_amount_minor,fulfillment_type,status) values($1,$2,$3,0,$3,$4,'paid') returning id`,[o.id,g.sellerId,g.subtotal,g.fulfillment])).rows[0];for(const item of g.items)await c.query("insert into order_items(seller_order_id,product_id,title_snapshot,unit_price_minor,quantity,total_minor) values($1,$2,$3,$4,$5,$6)",[so.id,item.productId,item.title,item.price,item.quantity,item.price*item.quantity]);}
+  for(const g of groups.values()){const so=(await c.query(`insert into seller_orders(order_id,seller_id,subtotal_minor,platform_fee_minor,seller_amount_minor,fulfillment_type) values($1,$2,$3,0,$3,$4) returning id`,[o.id,g.sellerId,g.subtotal,g.fulfillment])).rows[0];for(const item of g.items)await c.query("insert into order_items(seller_order_id,product_id,title_snapshot,unit_price_minor,quantity,total_minor) values($1,$2,$3,$4,$5,$6)",[so.id,item.productId,item.title,item.price,item.quantity,item.price*item.quantity]);}
   return {id:o.id,totalMinor:total,platformFeeMinor:0,paymentRequired:false,settlement:"direct_with_seller"};
  }); return reply.code(201).send({order});
+});
+app.post("/api/orders/:id/confirm-direct-payment",async(req,reply)=>{
+ const buyer=await auth(req);
+ const id=z.string().uuid().parse((req.params as any).id);
+ const result=await withTransaction(async(c)=>{
+  const order=(await c.query("select id,status from orders where id=$1 and buyer_id=$2 for update",[id,buyer.id])).rows[0];
+  if(!order)return null;
+  if(order.status!=="created")throw Object.assign(new Error("Этот заказ уже нельзя подтвердить как оплаченный"),{statusCode:409});
+  const sellers=(await c.query("select seller_id from seller_orders where order_id=$1 and status='created'",[id])).rows;
+  if(!sellers.length)throw Object.assign(new Error("В заказе нет ожидающих подтверждения позиций"),{statusCode:409});
+  await c.query("update orders set status='paid',updated_at=now() where id=$1",[id]);
+  await c.query("update seller_orders set status='paid' where order_id=$1 and status='created'",[id]);
+  for(const row of sellers)await c.query("insert into notifications(user_id,type,title,body) values($1,'direct_payment_confirmed','Покупатель подтвердил оплату','Покупатель отметил, что перевёл оплату напрямую. Подтвердите заказ в кабинете.')",[row.seller_id]);
+  return {id,status:"paid"};
+ });
+ if(!result)return reply.code(404).send({error:"Заказ не найден"});
+ return result;
 });
 app.post("/api/orders/:id/payment-order",async(req,reply)=>{
  await auth(req);
