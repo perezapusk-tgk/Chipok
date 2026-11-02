@@ -7,7 +7,6 @@ import { validateTelegramInitData } from "./telegram.js";
 import { OrderService } from "./services/order-service.js";
 
 type OrderTelegramEvent="created"|"paid"|"seller_confirmed"|"seller_cancelled"|"ready"|"completed"|"expired";
-type OrderTelegramEvent="created"|"paid"|"seller_confirmed"|"seller_cancelled"|"ready"|"completed"|"expired";
 function telegramHtmlEscape(value:unknown):string{return String(value??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 async function notifyOrderTelegram(orderId:string,event:OrderTelegramEvent,sellerOrderId?:string){
  try{
