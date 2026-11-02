@@ -313,7 +313,7 @@ async function applyCasheraTransactionStatus(tx:any,sourcePayload?:unknown){
      } else if(["cancelled","refunded","disputed"].includes(payment.order_status)){
        await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_paid_late','Оплата подтверждена после изменения заказа',$2)",[payment.buyer_id,`Cashera подтвердил оплату заказа ${payment.order_id}, но заказ уже имеет статус «${payment.order_status}». Обратитесь в поддержку для сверки.`]);
      }
-   } else if(["refunded","chargeback"].includes(snap.status)){
+   } else if(["refunded","chargeback"].includes(String(snap.status))){
      if(payment.order_status!=="refunded")await c.query("update orders set status=case when $2='refunded' then 'refunded' else 'disputed' end,updated_at=now() where id=$1",[payment.order_id,snap.status]);
      await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_reversed','Статус оплаты изменён',$2)",[payment.buyer_id,`Cashera сообщил статус «${snap.status}» для заказа ${payment.order_id}. Выплата продавцу требует сверки.`]);
    }
