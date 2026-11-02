@@ -430,6 +430,20 @@ app.post("/api/seller-orders/:id/complete",async(req,reply)=>{
  return result;
 });
 
+app.get("/api/seller/payment-settings",async(req)=>{
+ const seller=await auth(req);
+ const r=await pool.query("select payment_method,payment_details,payment_recipient,payment_bank,payment_link from seller_profiles where user_id=$1",[seller.id]);
+ return {settings:r.rows[0]||{payment_method:"sbp",payment_details:null,payment_recipient:null,payment_bank:null,payment_link:null}};
+});
+app.put("/api/seller/payment-settings",async(req,reply)=>{
+ const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
+ const body=z.object({paymentMethod:z.enum(["sbp","card","link"]),paymentDetails:z.string().trim().max(500).optional().nullable(),paymentRecipient:z.string().trim().max(120).optional().nullable(),paymentBank:z.string().trim().max(120).optional().nullable(),paymentLink:z.string().trim().url().max(500).optional().nullable()}).parse(req.body);
+ if(body.paymentMethod==="link"&&!body.paymentLink)return reply.code(400).send({error:"Добавьте ссылку на оплату"});
+ if(body.paymentMethod!=="link"&&!body.paymentDetails)return reply.code(400).send({error:"Добавьте номер телефона СБП или номер карты"});
+ const r=await pool.query("update seller_profiles set payment_method=$2,payment_details=$3,payment_recipient=$4,payment_bank=$5,payment_link=$6 where user_id=$1 returning payment_method,payment_details,payment_recipient,payment_bank,payment_link",[seller.id,body.paymentMethod,body.paymentDetails||null,body.paymentRecipient||null,body.paymentBank||null,body.paymentLink||null]);
+ if(!r.rowCount)return reply.code(404).send({error:"Профиль продавца не найден"});
+ return {settings:r.rows[0]};
+});
 app.get("/api/seller/reliability",async(req)=>{const seller=await auth(req);const r=await pool.query("select reliability_score,completed_sales from seller_profiles where user_id=$1",[seller.id]);if(!r.rowCount)return {score:0,level:"blocked",completedSales:0};const score=Number(r.rows[0].reliability_score);return {score,level:reliabilityLevel(score),completedSales:Number(r.rows[0].completed_sales)};});
 app.get("/api/seller/balance",async(req)=>{
  const seller=await auth(req);
@@ -712,7 +726,19 @@ app.post("/api/admin/refunds/:id/resolve",async(req,reply)=>{
 
 app.get("/api/admin/moderation",async(req,reply)=>{const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});const r=await pool.query(`select m.id,m.status,m.reason,m.created_at,p.id as product_id,p.title,p.price_minor,p.currency,u.first_name as seller_name from moderation_queue m join products p on p.id=m.product_id join users u on u.id=p.seller_id where m.status='pending' order by m.created_at asc`);return {items:r.rows};});
 app.get("/api/orders",async(req)=>{
- const buyer=await auth(req);const r=await pool.query("select o.id,o.status,o.total_minor,o.currency,o.platform_fee_minor,o.created_at,coalesce(json_agg(json_build_object('id',so.id,'seller_id',so.seller_id,'status',so.status,'subtotal_minor',so.subtotal_minor,'seller_amount_minor',so.seller_amount_minor,'fulfillment_type',so.fulfillment_type,'items',(select coalesce(json_agg(json_build_object('id',oi.id,'product_id',oi.product_id,'title',p.title,'quantity',oi.quantity,'unit_price_minor',oi.unit_price_minor,'reviewed',exists(select 1 from reviews rv where rv.order_item_id=oi.id and rv.buyer_id=o.buyer_id))),'[]') from order_items oi join products p on p.id=oi.product_id where oi.seller_order_id=so.id))) filter(where so.id is not null),'[]') as seller_orders from orders o left join seller_orders so on so.order_id=o.id where o.buyer_id=$1 group by o.id order by o.created_at desc",[buyer.id]);return {items:r.rows};
+ const buyer=await auth(req);
+ const r=await pool.query(`select o.id,o.status,o.total_minor,o.currency,o.platform_fee_minor,o.created_at,
+ coalesce(json_agg(json_build_object(
+ 'id',so.id,'seller_id',so.seller_id,'status',so.status,'subtotal_minor',so.subtotal_minor,
+ 'seller_amount_minor',so.seller_amount_minor,'fulfillment_type',so.fulfillment_type,
+ 'payment_method',sp.payment_method,'payment_details',sp.payment_details,'payment_recipient',sp.payment_recipient,
+ 'payment_bank',sp.payment_bank,'payment_link',sp.payment_link,'store_name',coalesce(st.name,sp.display_name,'Продавец'),
+ 'items',(select coalesce(json_agg(json_build_object('id',oi.id,'product_id',oi.product_id,'title',p.title,'quantity',oi.quantity,'unit_price_minor',oi.unit_price_minor,'reviewed',exists(select 1 from reviews rv where rv.order_item_id=oi.id and rv.buyer_id=o.buyer_id))),'[]') from order_items oi join products p on p.id=oi.product_id where oi.seller_order_id=so.id)
+ )) filter(where so.id is not null),'[]') as seller_orders
+ from orders o left join seller_orders so on so.order_id=o.id
+ left join seller_profiles sp on sp.user_id=so.seller_id left join stores st on st.seller_id=so.seller_id
+ where o.buyer_id=$1 group by o.id order by o.created_at desc`,[buyer.id]);
+ return {items:r.rows};
 });
 app.get("/api/seller/orders",async(req)=>{
  const seller=await auth(req);const r=await pool.query("select so.id,so.order_id,so.status,so.subtotal_minor,so.platform_fee_minor,so.seller_amount_minor,so.fulfillment_type,o.created_at,o.buyer_id from seller_orders so join orders o on o.id=so.order_id where so.seller_id=$1 order by o.created_at desc",[seller.id]);return {items:r.rows};
