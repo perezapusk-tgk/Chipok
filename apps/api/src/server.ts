@@ -269,7 +269,7 @@ app.post("/api/auth/telegram",async(req)=>({user:await auth(req)}));
 app.get("/api/categories",async()=>({items:(await pool.query("select id,name,slug,parent_id,restricted,age_restriction from categories order by name")).rows}));
 app.get("/api/catalog",async(req)=>{
  const q=z.object({search:z.string().trim().max(100).optional(),categoryId:z.string().uuid().optional(),limit:z.coerce.number().int().min(1).max(50).default(20),offset:z.coerce.number().int().min(0).default(0)}).parse(req.query);
- const values:any[]=[];const where:string[]=[`p.status='published'`,`exists(select 1 from seller_subscriptions ss where ss.user_id=p.seller_id and ss.status='active' and ss.expires_at>now())`];
+ const values:any[]=[];const where:string[]=[`p.status='published'`,`exists(select 1 from seller_subscriptions ss where ss.user_id=p.seller_id and ss.status='active' and ss.expires_at>now())`,`exists(select 1 from seller_profiles sp where sp.user_id=p.seller_id and ((sp.payment_method='link' and nullif(trim(sp.payment_link),'') is not null) or (sp.payment_method<>'link' and nullif(trim(sp.payment_details),'') is not null)))`];
  if(q.search){values.push(`%${q.search}%`);where.push(`(p.title ilike $${values.length} or coalesce(p.description,'') ilike $${values.length})`)}
  if(q.categoryId){values.push(q.categoryId);where.push(`p.category_id=$${values.length}`)}
  const limitParam=values.length+1; const offsetParam=values.length+2; values.push(q.limit,q.offset);
