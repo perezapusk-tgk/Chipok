@@ -621,7 +621,7 @@ app.post("/api/admin/disputes/:id/resolve",async(req,reply)=>{
     const refundExists=await c.query("select 1 from refunds where order_id=$1",[d.order_id]);
     if(!refundExists.rowCount) await c.query("insert into refunds(order_id,payment_id,amount_minor,currency,status,reason) values($1,$2,$3,$4,'pending',$5)",[d.order_id,paymentRow.rows[0]?.id||null,Number(order.total_minor),order.currency,"Возврат по спору "+id]);
     await c.query("update payments set status='refund_pending',updated_at=now() where order_id=$1 and status='paid'",[d.order_id]);
-    await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'refund_pending','Возврат оформлен','Возврат зарегистрирован и ожидает подтверждения платёжного провайдера.' from orders where id=$1",[d.order_id]);
+    await c.query("insert into notifications(user_id,type,title,body) select buyer_id,'refund_pending','Возврат оформлен','Возврат ожидает ручной проверки прямого перевода продавца покупателю.' from orders where id=$1",[d.order_id]);
     await c.query("insert into notifications(user_id,type,title,body) select so.seller_id,'refund_pending','Возврат по спору','По заказу зарегистрирован возврат. Выплата продавцу не производится до завершения возврата.' from seller_orders so where so.order_id=$1",[d.order_id]);
    }
   } else {
@@ -664,7 +664,7 @@ app.post("/api/admin/refunds/:id/resolve",async(req,reply)=>{
    await c.query("update refunds set status='completed',provider_refund_id=coalesce($1,provider_refund_id),completed_at=now(),updated_at=now() where id=$2",[body.providerRefundId||null,id]);
    await c.query("update payments set status='refunded',updated_at=now() where id=$1",[refund.payment_id]);
    await c.query("update orders set status='refunded',updated_at=now() where id=$1",[refund.order_id]);
-   await c.query("insert into notifications(user_id,type,title,body) values($1,'refund_completed','Возврат выполнен','Средства по заказу возвращены покупателю платёжным провайдером.')",[order.buyer_id]);
+   await c.query("insert into notifications(user_id,type,title,body) values($1,'refund_completed','Возврат выполнен','Прямой возврат от продавца покупателю подтверждён.')",[order.buyer_id]);
   }else{
    await c.query("update refunds set status='failed',provider_refund_id=coalesce($1,provider_refund_id),updated_at=now() where id=$2",[body.providerRefundId||null,id]);
    await c.query("update payments set status='paid',updated_at=now() where id=$1",[refund.payment_id]);
@@ -681,7 +681,7 @@ app.post("/api/admin/refunds/:id/resolve",async(req,reply)=>{
     const exists=await c.query("select 1 from platform_ledger_entries where order_id=$1 and type='adjustment' and description=$2",[refund.order_id,desc]);
     if(!exists.rowCount)await c.query("insert into platform_ledger_entries(order_id,type,amount_minor,currency,description) values($1,'adjustment',$2,$3,$4)",[refund.order_id,Number(pfee.rows[0].amount_minor),pfee.rows[0].currency,desc]);
    }
-   await c.query("insert into notifications(user_id,type,title,body) values($1,'refund_failed','Возврат не выполнен','Платёжный провайдер не подтвердил возврат. Заказ передан на повторную обработку.')",[order.buyer_id]);
+   await c.query("insert into notifications(user_id,type,title,body) values($1,'refund_failed','Возврат не выполнен','Прямой возврат не подтверждён. Заказ остаётся в споре для дальнейшего согласования.')",[order.buyer_id]);
   }
   await c.query("insert into admin_actions(admin_id,action,target_type,target_id,metadata) values($1,'resolve_refund','refund',$2,$3)",[admin.id,refund.id,JSON.stringify({status:body.status,providerRefundId:body.providerRefundId||null,note:body.note||null})]);
   return {id:refund.id,status:body.status};
