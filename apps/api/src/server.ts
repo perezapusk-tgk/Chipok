@@ -192,7 +192,7 @@ async function configureTelegramWebhook(){
    }
    app.log.info({webhookUrl},"Telegram webhook registered");
   }
-  const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть Nookly"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь"},{command:"terms",description:"Условия покупки"},{command:"support",description:"Поддержка"}]})});
+  const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть Nookly"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь и документы"},{command:"terms",description:"Пользовательское соглашение"},{command:"privacy",description:"Политика конфиденциальности"},{command:"support",description:"Техническая поддержка"}]})});
   const commandsData=await commands.json() as {ok:boolean;description?:string};
   if(!commandsData.ok)app.log.warn({description:commandsData.description},"Telegram commands registration failed");
   const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
@@ -313,7 +313,7 @@ async function applyCasheraTransactionStatus(tx:any,sourcePayload?:unknown){
      } else if(["cancelled","refunded","disputed"].includes(payment.order_status)){
        await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_paid_late','Оплата подтверждена после изменения заказа',$2)",[payment.buyer_id,`Cashera подтвердил оплату заказа ${payment.order_id}, но заказ уже имеет статус «${payment.order_status}». Обратитесь в поддержку для сверки.`]);
      }
-   } else if(["refunded","chargeback"].includes(snap.status)){
+   } else if(["refunded","chargeback"].includes(String(snap.status))){
      if(payment.order_status!=="refunded")await c.query("update orders set status=case when $2='refunded' then 'refunded' else 'disputed' end,updated_at=now() where id=$1",[payment.order_id,snap.status]);
      await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_reversed','Статус оплаты изменён',$2)",[payment.buyer_id,`Cashera сообщил статус «${snap.status}» для заказа ${payment.order_id}. Выплата продавцу требует сверки.`]);
    }
@@ -766,14 +766,20 @@ app.post("/api/telegram/webhook",async(req,reply)=>{
  if(update.message?.text&&update.message?.from?.id){
    const command=String(update.message.text).trim().split(/\\s+/)[0].toLowerCase();
    const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
+   const legalBase=webAppUrl?new URL("legal/",webAppUrl).toString():"";
+   const termsUrl=legalBase?new URL("terms.html",legalBase).toString():"";
+   const privacyUrl=legalBase?new URL("privacy.html",legalBase).toString():"";
+   const supportUrl="https://t.me/nikita_seton";
    if(command==="/start"||command==="/shop"){
-     await telegramSendMessage(update.message.chat.id,"Nookly — маркетплейс внутри Telegram.\\n\\nОткрой каталог и выбирай товары.",webAppUrl?{inline_keyboard:[[{text:"🛍 Открыть Nookly",web_app:{url:webAppUrl}}]]}:undefined);
+     await telegramSendMessage(update.message.chat.id,"Nookly — маркетплейс внутри Telegram.\\n\\nОткрой каталог и выбирай товары.",webAppUrl?{inline_keyboard:[[{text:"🛍 Открыть Nookly",web_app:{url:webAppUrl}}],[{text:"📄 Пользовательское соглашение",url:termsUrl},{text:"🔐 Политика конфиденциальности",url:privacyUrl}],[{text:"💬 Техническая поддержка",url:supportUrl}]]}:undefined);
    } else if(command==="/help"){
-     await telegramSendMessage(update.message.chat.id,"Nookly — маркетплейс внутри Telegram.\\n\\n/shop — открыть каталог\\n/terms — условия покупки\\n/support — поддержка по заказам");
+     await telegramSendMessage(update.message.chat.id,"Nookly — помощь и информация.\\n\\nВыберите нужный раздел:",{inline_keyboard:[[{text:"📄 Пользовательское соглашение",url:termsUrl}],[{text:"🔐 Политика конфиденциальности",url:privacyUrl}],[{text:"💬 Техническая поддержка",url:supportUrl}],...(webAppUrl?[[{text:"🛍 Открыть Nookly",web_app:{url:webAppUrl}}]]:[])]});
    } else if(command==="/terms"){
-     await telegramSendMessage(update.message.chat.id,"Условия Nookly: заказ создаётся в Mini App, продавец подтверждает наличие, получение подтверждается кодом. Денежные расчёты на текущем этапе обрабатываются вручную.");
+     await telegramSendMessage(update.message.chat.id,"Пользовательское соглашение Nookly. Откройте документ по кнопке ниже.",{inline_keyboard:[[ {text:"📄 Открыть соглашение",url:termsUrl} ]]});
+   } else if(command==="/privacy"){
+     await telegramSendMessage(update.message.chat.id,"Политика конфиденциальности Nookly. Откройте документ по кнопке ниже.",{inline_keyboard:[[ {text:"🔐 Открыть политику",url:privacyUrl} ]]});
    } else if(command==="/support"){
-     await telegramSendMessage(update.message.chat.id,"Поддержка Nookly: откройте раздел «Заказы» в Mini App и укажите номер заказа.");
+     await telegramSendMessage(update.message.chat.id,"Техническая поддержка Nookly. Напишите нам, если возникли вопросы по заказу, оплате или работе приложения.",{inline_keyboard:[[ {text:"💬 Написать в поддержку",url:supportUrl} ]]});
    } else if(command==="/balance"){
      const u=(await pool.query("select id from users where telegram_id=$1",[update.message.from.id])).rows[0];
      if(!u){

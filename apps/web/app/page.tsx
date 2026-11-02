@@ -15,7 +15,7 @@ declare global {
   interface Window {
     Telegram?: {
       WebApp?: {
-        ready:()=>void; expand:()=>void; initData?:string;
+        ready:()=>void; expand:()=>void; initData?:string; openLink?:(url:string)=>void; openTelegramLink?:(url:string)=>void;
       }
     }
   }
@@ -323,8 +323,12 @@ function Profile({user,sellerProducts,setSellerProducts,loadSeller,setMessage,ca
     {!seller&&!admin&&<button onClick={()=>setMode("onboard")}><span>Стать продавцом</span><span>›</span></button>}
     <button onClick={()=>setMode("notifications")}><span>Уведомления</span><span>{unread?unread+" новых":"›"}</span></button>
     {admin&&<button onClick={()=>setMode("admin")}><span>Админ-панель</span><span>›</span></button>}
-    <button onClick={()=>setMessage("Безопасная оплата проходит внутри Telegram. Комиссия Nookly удерживается с продавца.")}><span>Оплата и безопасность</span><span>›</span></button>
+    <button onClick={()=>setMessage("Безопасная оплата проходит через подключённый платёжный сервис. Комиссия Nookly удерживается с продавца.")}><span>Оплата и безопасность</span><span>›</span></button>
     <button onClick={()=>setMessage("Получение: продавец и покупатель договариваются о месте и времени в чате.")}><span>Как получить заказ</span><span>›</span></button>
+    <div className="small" style={{padding:"14px 4px 4px",fontWeight:800,letterSpacing:".08em"}}>ИНФОРМАЦИЯ И ПОМОЩЬ</div>
+    <button onClick={()=>{const u=(process.env.GITHUB_PAGES==="true"?"/Chipok":"")+"/legal/terms.html";if(window.Telegram?.WebApp?.openLink)window.Telegram.WebApp.openLink(new URL(u,window.location.origin).toString());else window.open(u,"_blank","noopener,noreferrer")}}><span>Пользовательское соглашение</span><span>↗</span></button>
+    <button onClick={()=>{const u=(process.env.GITHUB_PAGES==="true"?"/Chipok":"")+"/legal/privacy.html";if(window.Telegram?.WebApp?.openLink)window.Telegram.WebApp.openLink(new URL(u,window.location.origin).toString());else window.open(u,"_blank","noopener,noreferrer")}}><span>Политика конфиденциальности</span><span>↗</span></button>
+    <button onClick={()=>{const u="https://t.me/nikita_seton";if(window.Telegram?.WebApp?.openTelegramLink)window.Telegram.WebApp.openTelegramLink(u);else window.open(u,"_blank","noopener,noreferrer")}}><span>Техническая поддержка</span><span>↗</span></button>
    </div>
   </div>
  </div>;
