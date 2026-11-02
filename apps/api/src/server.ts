@@ -183,9 +183,9 @@ setInterval(()=>{expireUnpaidOrders().catch(error=>app.log.error(error,"Failed t
 app.addHook("onRequest",async(req,reply)=>{const key=`${req.ip}:${req.method}:${req.url.split("?")[0]}`;if(!rateLimit(key)){reply.header("Retry-After","60");return reply.code(429).send({error:"Слишком много запросов. Попробуйте позже."})}});
 
 function reliabilityLevel(score:number){if(score<50)return "blocked";if(score<60)return "restricted";if(score<80)return "warning";return "stable"}
-const SELLER_PLANS={start:{price:19900,label:"Старт"},standard:{price:39900,label:"Стандарт"},plus:{price:69900,label:"Плюс"}} as const;
+const SELLER_PLANS={start:{price:19900,label:"Старт"},standard:{price:0,label:"Стандарт"},plus:{price:69900,label:"Плюс"}} as const;
 async function activeSellerSubscription(userId:string,client:any=pool){
- const r=await client.query("select id,plan,expires_at from seller_subscriptions where user_id=$1 and status='active' and expires_at>now() order by expires_at desc limit 1",[userId]);
+ const r=await client.query("select id,plan,expires_at from seller_subscriptions where user_id=$1 and status='active' and ((plan='standard' and amount_minor=0) or expires_at>now()) order by expires_at desc nulls first limit 1",[userId]);
  return r.rows[0]||null;
 }
 
@@ -269,7 +269,7 @@ app.post("/api/auth/telegram",async(req)=>({user:await auth(req)}));
 app.get("/api/categories",async()=>({items:(await pool.query("select id,name,slug,parent_id,restricted,age_restriction from categories order by name")).rows}));
 app.get("/api/catalog",async(req)=>{
  const q=z.object({search:z.string().trim().max(100).optional(),categoryId:z.string().uuid().optional(),limit:z.coerce.number().int().min(1).max(50).default(20),offset:z.coerce.number().int().min(0).default(0)}).parse(req.query);
- const values:any[]=[];const where:string[]=[`p.status='published'`,`exists(select 1 from seller_subscriptions ss where ss.user_id=p.seller_id and ss.status='active' and ss.expires_at>now())`,`exists(select 1 from seller_profiles sp where sp.user_id=p.seller_id and ((sp.payment_method='link' and nullif(trim(sp.payment_link),'') is not null) or (sp.payment_method<>'link' and nullif(trim(sp.payment_details),'') is not null)))`];
+ const values:any[]=[];const where:string[]=[`p.status='published'`,`exists(select 1 from seller_subscriptions ss where ss.user_id=p.seller_id and ss.status='active' and ((ss.plan='standard' and ss.amount_minor=0) or ss.expires_at>now()))`,`exists(select 1 from seller_profiles sp where sp.user_id=p.seller_id and ((sp.payment_method='link' and nullif(trim(sp.payment_link),'') is not null) or (sp.payment_method<>'link' and nullif(trim(sp.payment_details),'') is not null)))`];
  if(q.search){values.push(`%${q.search}%`);where.push(`(p.title ilike $${values.length} or coalesce(p.description,'') ilike $${values.length})`)}
  if(q.categoryId){values.push(q.categoryId);where.push(`p.category_id=$${values.length}`)}
  const limitParam=values.length+1; const offsetParam=values.length+2; values.push(q.limit,q.offset);
@@ -527,21 +527,24 @@ app.get("/api/seller/payouts",async(req)=>{
 });
 app.post("/api/seller/onboard",async(req,reply)=>{
  const user=await auth(req);
- const body=z.object({storeName:z.string().trim().min(2).max(100),description:z.string().trim().max(1000).optional(),plan:z.enum(["start","standard","plus"]).default("start"),promoCode:z.string().trim().max(32).optional()}).parse(req.body);
+ const body=z.object({storeName:z.string().trim().min(2).max(100),description:z.string().trim().max(1000).optional(),plan:z.enum(["start","standard","plus"]).default("standard"),promoCode:z.string().trim().max(32).optional()}).parse(req.body);
+ if(body.promoCode?.toUpperCase()==="START99")return reply.code(410).send({error:"Промокод START99 отключён."});
  const plan=SELLER_PLANS[body.plan];
  const request=await withTransaction(async(c)=>{
   await c.query("insert into seller_profiles(user_id,display_name,description) values($1,$2,$3) on conflict(user_id) do update set display_name=excluded.display_name,description=excluded.description",[user.id,body.storeName,body.description||null]);
   await c.query("insert into stores(seller_id,name,description) values($1,$2,$3) on conflict(seller_id) do update set name=excluded.name,description=excluded.description",[user.id,body.storeName,body.description||null]);
+  if(body.plan==="standard"){
+   await c.query("update seller_subscriptions set status='cancelled',updated_at=now() where user_id=$1 and status='pending'",[user.id]);
+   let free=(await c.query("select id,status,plan,amount_minor,promo_code from seller_subscriptions where user_id=$1 and status='active' and plan='standard' and amount_minor=0 order by created_at desc limit 1 for update",[user.id])).rows[0];
+   if(!free)free=(await c.query("insert into seller_subscriptions(user_id,plan,status,amount_minor,promo_code,payment_method,starts_at,expires_at) values($1,'standard','active',0,null,'bank_transfer',now(),null) returning id,status,plan,amount_minor,promo_code",[user.id])).rows[0];
+   await c.query("update users set role=case when role='admin' then role else 'seller' end,updated_at=now() where id=$1",[user.id]);
+   return free;
+  }
   const pending=(await c.query("select id,status,plan,amount_minor,promo_code from seller_subscriptions where user_id=$1 and status='pending' order by created_at desc limit 1 for update",[user.id])).rows[0];
   if(pending)return pending;
-  let amount:number=plan.price;let promoCode:null|string=null;
-  if(body.promoCode?.toUpperCase()==="START99"){
-   const promo=(await c.query("select * from seller_subscription_promotions where code='START99' and active=true and redeemed_count<least(max_redemptions,5) for update")).rows[0];
-   if(promo){amount=Number(promo.discount_amount_minor);promoCode="START99";await c.query("update seller_subscription_promotions set redeemed_count=redeemed_count+1 where code='START99'");}
-  }
-  return (await c.query("insert into seller_subscriptions(user_id,plan,status,amount_minor,promo_code,payment_method) values($1,$2,'pending',$3,$4,'bank_transfer') returning id,status,plan,amount_minor,promo_code",[user.id,body.plan,amount,promoCode])).rows[0];
+  return (await c.query("insert into seller_subscriptions(user_id,plan,status,amount_minor,promo_code,payment_method) values($1,$2,'pending',$3,null,'bank_transfer') returning id,status,plan,amount_minor,promo_code",[user.id,body.plan,plan.price])).rows[0];
  });
- return {seller:false,role:user.role,subscription:request,paymentDetails:process.env.SELLER_SUBSCRIPTION_PAYMENT_DETAILS||null,supportUrl:"https://t.me/nikita_seton"};
+ return {seller:request.status==="active",role:request.status==="active"?"seller":user.role,subscription:request,paymentDetails:request.status==="active"?null:process.env.SELLER_SUBSCRIPTION_PAYMENT_DETAILS||null,supportUrl:"https://t.me/nikita_seton"};
 });
 app.get("/api/seller/subscription",async(req)=>{const user=await auth(req);const r=await pool.query("select id,plan,status,amount_minor,promo_code,starts_at,expires_at,created_at from seller_subscriptions where user_id=$1 order by created_at desc limit 1",[user.id]);return {subscription:r.rows[0]||null,paymentDetails:process.env.SELLER_SUBSCRIPTION_PAYMENT_DETAILS||null};});
 app.get("/api/admin/subscriptions",async(req,reply)=>{
