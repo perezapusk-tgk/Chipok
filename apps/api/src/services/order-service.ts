@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
-import { TransactionService } from "./transaction-service.js";
 
 function hashHandover(code: string) {
   return createHash("sha256").update(code).digest("hex");
@@ -115,20 +114,8 @@ export class OrderService {
     );
     const order = orderResult.rows[0];
 
-    await TransactionService.recordSellerSale(db, {
-      sellerId,
-      orderId: sellerOrder.order_id,
-      amountMinor: Number(sellerOrder.seller_amount_minor),
-      currency: order?.currency || sellerOrder.order_currency || "RUB",
-    });
-
-    if (order?.status === "completed") {
-      await TransactionService.recordPlatformCommission(db, {
-        orderId: sellerOrder.order_id,
-        amountMinor: Number(order.platform_fee_minor),
-        currency: order.currency,
-      });
-    }
+    // Product payment was settled directly between buyer and seller.
+    // Nookly records fulfillment only and never credits an internal seller balance.
 
     await db.query(
       "update seller_profiles set completed_sales=completed_sales+1 where user_id=$1",
@@ -146,9 +133,9 @@ export class OrderService {
         sellerId,
         oldSellerStatus,
         JSON.stringify({
-          commissionRecorded: order?.status === "completed",
-          sellerAmountMinor: Number(sellerOrder.seller_amount_minor),
-          platformFeeMinor: Number(order?.platform_fee_minor || 0),
+          commissionRecorded: false,
+          sellerAmountMinor: Number(sellerOrder.subtotal_minor),
+          platformFeeMinor: 0,
         }),
       ],
     );
@@ -163,8 +150,8 @@ export class OrderService {
       sellerOrderId,
       orderId: sellerOrder.order_id,
       status: "completed" as const,
-      sellerAmountMinor: Number(sellerOrder.seller_amount_minor),
-      platformFeeMinor: Number(order?.platform_fee_minor || 0),
+      sellerAmountMinor: Number(sellerOrder.subtotal_minor),
+      platformFeeMinor: 0,
     };
   }
 }
