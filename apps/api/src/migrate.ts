@@ -24,24 +24,33 @@ async function resolveMigrationsDir() {
 }
 
 export async function runMigrations() {
-  await pool.query(`create table if not exists schema_migrations(
-    filename text primary key,
-    applied_at timestamptz not null default now()
-  )`);
-
   const dir = await resolveMigrationsDir();
   const files = (await readdir(dir)).filter(x => /^\d+_.*\.sql$/.test(x)).sort();
 
+  // Advisory transaction locks serialize concurrent cold starts across Vercel
+  // instances. Transaction-scoped locks also work with Neon PgBouncer pooling.
   for (const filename of files) {
-    const done = await pool.query("select 1 from schema_migrations where filename=$1", [filename]);
-    if (done.rowCount) continue;
-
-    const sql = await readFile(path.join(dir, filename), "utf8");
     const client = await pool.connect();
     try {
       await client.query("begin");
+      await client.query("select pg_advisory_xact_lock(2026, 1103)");
+      await client.query(`create table if not exists schema_migrations(
+        filename text primary key,
+        applied_at timestamptz not null default now()
+      )`);
+
+      const done = await client.query("select 1 from schema_migrations where filename=$1", [filename]);
+      if (done.rowCount) {
+        await client.query("commit");
+        continue;
+      }
+
+      const sql = await readFile(path.join(dir, filename), "utf8");
       await client.query(sql);
-      await client.query("insert into schema_migrations(filename) values($1)", [filename]);
+      await client.query(
+        "insert into schema_migrations(filename) values($1) on conflict(filename) do nothing",
+        [filename],
+      );
       await client.query("commit");
     } catch (error) {
       await client.query("rollback");
