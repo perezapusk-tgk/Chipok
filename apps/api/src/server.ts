@@ -539,7 +539,7 @@ app.post("/api/seller/onboard",async(req,reply)=>{
   if(pending)return pending;
   let amount=plan.price;let promoCode:null|string=null;
   if(body.promoCode?.toUpperCase()==="START99"){
-   const promo=(await c.query("select * from seller_subscription_promotions where code='START99' and active=true and redeemed_count<max_redemptions for update")).rows[0];
+   const promo=(await c.query("select * from seller_subscription_promotions where code='START99' and active=true and redeemed_count<least(max_redemptions,5) for update")).rows[0];
    if(promo){amount=Number(promo.discount_amount_minor);promoCode="START99";await c.query("update seller_subscription_promotions set redeemed_count=redeemed_count+1 where code='START99'");}
   }
   return (await c.query("insert into seller_subscriptions(user_id,plan,status,amount_minor,promo_code,payment_method) values($1,$2,'pending',$3,$4,'bank_transfer') returning id,status,plan,amount_minor,promo_code",[user.id,body.plan,amount,promoCode])).rows[0];
