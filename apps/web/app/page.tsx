@@ -242,7 +242,7 @@ function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}) {
      {(active.seller_orders||[]).map((so:any)=><div className="order-seller" key={so.id}>
        <b>{so.store_name||"Продавец"}</b>
        <span>{statusRu(so.status)} · {so.fulfillment_type==="meeting"?"Встреча":"Самовывоз"} · {money(Number(so.seller_amount_minor),active.currency)}</span>
-       {active.status==="created"&&<div className="form-card"><b>Оплата продавцу напрямую</b>{so.payment_method==="link"&&so.payment_link?<a className="primary wide" href={so.payment_link} target="_blank" rel="noreferrer">Перейти к оплате</a>:<><span>{so.payment_method==="card"?"Перевод на карту":"СБП по номеру телефона"}: {so.payment_details||"Продавец ещё не добавил реквизиты"}</span>{so.payment_bank&&<span>Банк: {so.payment_bank}</span>}</>}{so.payment_recipient&&<span>Получатель: {so.payment_recipient}</span>}</div>
+       {active.status==="created"&&<div className="form-card"><b>Оплата продавцу напрямую</b>{so.payment_method==="link"&&so.payment_link?<a className="primary wide" href={so.payment_link} target="_blank" rel="noreferrer">Перейти к оплате</a>:<><span>{so.payment_method==="card"?"Перевод на карту":"СБП по номеру телефона"}: {so.payment_details||"Продавец ещё не добавил реквизиты"}</span>{so.payment_bank&&<span>Банк: {so.payment_bank}</span>}</>}{so.payment_recipient&&<span>Получатель: {so.payment_recipient}</span>}</div>}
        {so.status==="completed"&&(so.items||[]).map((item:any)=><div className="review-list" key={item.id}>
          <span>{item.title} × {item.quantity}</span>
          <button className="secondary mini" onClick={()=>{setReviewItem(item);setReviewRating(5)}}>Оставить отзыв</button>
