@@ -160,7 +160,7 @@ export default function Home(){
 function Cart({cart,total,setCart,checkout,loading}:{cart:Product[];total:number;setCart:Dispatch<SetStateAction<Product[]>>;checkout:()=>Promise<void>;loading:boolean}){
  const groups=Object.values(cart.reduce<Record<string,{p:Product;count:number}>>((a,p)=>{const k=p.id;a[k]=a[k]||{p,count:0};a[k].count++;return a},{}));
  const change=(id:string,delta:number)=>setCart(prev=>{const next=[...prev];if(delta>0){const p=prev.find(x=>x.id===id);if(p&&next.filter(x=>x.id===id).length<Number(p.available_stock??0))next.push(p)}else{const i=next.findIndex(x=>x.id===id);if(i>=0)next.splice(i,1)}return next});
- return <div className="hero cart-page"><div className="chat-head"><div><h1>Корзина</h1><span className="small">{cart.length} товаров</span></div></div>{groups.length?groups.map(({p,count})=><div className="cart-row" key={p.id}><img src={p.image||p.image_url||logo()} alt="" /><div><b>{p.title}</b><span>{money(Number(p.price_minor??Math.round((p.price||0)*100)),p.currency)}</span><div className="cart-qty"><button onClick={()=>change(p.id,-1)}>−</button><strong>{count}</strong><button onClick={()=>change(p.id,1)}>＋</button></div></div><button className="secondary mini danger" onClick={()=>setCart(prev=>prev.filter(x=>x.id!==p.id))}>Удалить</button></div>):<div className="chat-empty chat-empty-card">Корзина пуста.</div>}<div className="cart-total"><span>Итого</span><strong>{money(total)}</strong></div>{groups.length>0&&<button className="primary wide" disabled={loading} onClick={()=>void checkout()}>{loading?"Оформляем заказ…":"Оформить заказ"}</button>}<p className="small">Nookly не удерживает комиссию с продаж. Подписка оплачивается отдельно.</p></div>
+ return <div className="hero cart-page"><div className="chat-head"><div><h1>Корзина</h1><span className="small">{cart.length} товаров</span></div></div>{groups.length?groups.map(({p,count})=><div className="cart-row" key={p.id}><img src={p.image||p.image_url||logo()} alt="" /><div><b>{p.title}</b><span>{money(Number(p.price_minor??Math.round((p.price||0)*100)),p.currency)}</span><div className="cart-qty"><button onClick={()=>change(p.id,-1)}>−</button><strong>{count}</strong><button onClick={()=>change(p.id,1)}>＋</button></div></div><button className="secondary mini danger" onClick={()=>setCart(prev=>prev.filter(x=>x.id!==p.id))}>Удалить</button></div>):<div className="chat-empty chat-empty-card">Корзина пуста.</div>}<div className="cart-total"><span>Итого</span><strong>{money(total)}</strong></div>{groups.length>0&&<button className="primary wide" disabled={loading} onClick={()=>void checkout()}>{loading?"Оформляем заказ…":"Оформить заказ"}</button>}<p className="small">Nookly не удерживает комиссию с продаж. Тариф Standard бесплатный.</p></div>
 }
 
 function Card({p,open,add,toggleFavorite,isFavorite}:{p:Product;open:()=>void;add:()=>void;toggleFavorite:(p:Product)=>Promise<void>;isFavorite:boolean}){
@@ -330,7 +330,7 @@ function Profile({user,sellerProducts,setSellerProducts,loadSeller,setMessage,ca
     {admin&&<button onClick={()=>setMode("onboard")}><span>Тест регистрации и оплаты продавца</span><span>›</span></button>}
     <button onClick={()=>setMode("notifications")}><span>Уведомления</span><span>{unread?unread+" новых":"›"}</span></button>
     {admin&&<button onClick={()=>setMode("admin")}><span>Админ-панель</span><span>›</span></button>}
-    <button onClick={()=>setMessage("Оплата товара проходит напрямую между покупателем и продавцом по реквизитам продавца. Nookly не принимает и не хранит деньги за товары. Перед подтверждением продавец обязан проверить фактическое поступление денег. Подписка продавца оплачивается отдельно.")}><span>Оплата и безопасность</span><span>›</span></button>
+    <button onClick={()=>setMessage("Оплата товара проходит напрямую между покупателем и продавцом по реквизитам продавца. Nookly не принимает и не хранит деньги за товары. Перед подтверждением продавец обязан проверить фактическое поступление денег. Тариф Standard для продавцов бесплатный.")}><span>Оплата и безопасность</span><span>›</span></button>
     <button onClick={()=>setMessage("Получение: продавец и покупатель договариваются о месте и времени в чате.")}><span>Как получить заказ</span><span>›</span></button>
     <div className="small" style={{padding:"14px 4px 4px",fontWeight:800,letterSpacing:".08em"}}>ИНФОРМАЦИЯ И ПОМОЩЬ</div>
     <button onClick={()=>{const u=(process.env.GITHUB_PAGES==="true"?"/Chipok":"")+"/legal/terms.html";if(window.Telegram?.WebApp?.openLink)window.Telegram.WebApp.openLink(new URL(u,window.location.origin).toString());else window.open(u,"_blank","noopener,noreferrer")}}><span>Пользовательское соглашение</span><span>↗</span></button>
@@ -341,37 +341,34 @@ function Profile({user,sellerProducts,setSellerProducts,loadSeller,setMessage,ca
  </div>;
 }
 function SellerOnboard({setMessage,onDone,back}:{setMessage:(s:string)=>void;onDone:()=>void;back:()=>void}){
- const [storeName,setStoreName]=useState(""),[description,setDescription]=useState(""),[plan,setPlan]=useState<"start"|"standard"|"plus">("start"),[promo,setPromo]=useState(""),[request,setRequest]=useState<any>(null),[paymentDetails,setPaymentDetails]=useState<string|null>(null),[busy,setBusy]=useState(false);
+ const [storeName,setStoreName]=useState(""),[description,setDescription]=useState(""),[plan,setPlan]=useState<"start"|"standard"|"plus">("standard"),[request,setRequest]=useState<any>(null),[paymentDetails,setPaymentDetails]=useState<string|null>(null),[busy,setBusy]=useState(false);
  async function submit(){
   if(storeName.trim().length<2)return;
   setBusy(true);
   try{
    const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
-   const r=await fetch(api()+"/api/seller/onboard",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init},body:JSON.stringify({storeName:storeName.trim(),description:description.trim()||undefined,plan,promoCode:promo.trim()||undefined})});
-   if(!r.ok)throw new Error((await r.json()).error||"Не удалось отправить заявку");
-   const data=await r.json();setRequest(data.subscription);setPaymentDetails(data.paymentDetails||null);setMessage("Заявка на подписку создана. После перевода мы активируем кабинет.");
+   const r=await fetch(api()+"/api/seller/onboard",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init},body:JSON.stringify({storeName:storeName.trim(),description:description.trim()||undefined,plan})});
+   if(!r.ok)throw new Error((await r.json()).error||"Не удалось создать кабинет");
+   const data=await r.json();setRequest(data.subscription);setPaymentDetails(data.paymentDetails||null);setMessage(data.subscription?.status==="active"?"Бесплатный кабинет продавца создан. Можно добавлять товары.":"Заявка на платный тариф отправлена.");
+   if(data.subscription?.status==="active")onDone();
   }catch(e){setMessage(e instanceof Error?e.message:"Ошибка")}
   finally{setBusy(false)}
  }
  return <div className="hero">
   <button className="icon-btn" onClick={back}>←</button>
   <h1>Стать продавцом</h1>
-  <p>Продавай товары в Nookly по доступной абонентской подписке. Комиссии с продаж нет — выручка остаётся у тебя.</p>
+  <p>Начни бесплатно на тарифе Standard. Оплата товаров проходит напрямую покупателем продавцу — Nookly не удерживает комиссию с продаж.</p>
   {request?<div className="form-card">
-   <h2>Заявка отправлена</h2>
-   <p>Тариф: {request.plan==="start"?"Старт":request.plan==="standard"?"Стандарт":"Плюс"} · {money(Number(request.amount_minor),"RUB")}</p>
-   <p>Статус: ожидает подтверждения перевода.</p>
-   {paymentDetails?<p style={{whiteSpace:"pre-wrap"}}>{paymentDetails}</p>:<p>Реквизиты для перевода уточни в поддержке.</p>}
-   <button className="primary wide" onClick={()=>{const u="https://t.me/nikita_seton";if(window.Telegram?.WebApp?.openTelegramLink)window.Telegram.WebApp.openTelegramLink(u);else window.open(u,"_blank","noopener,noreferrer")}}>Написать в поддержку</button>
+   <h2>{request.status==="active"?"Кабинет продавца готов":"Заявка отправлена"}</h2>
+   <p>Тариф: {request.plan==="start"?"Старт":request.plan==="standard"?"Стандарт":"Плюс"} · {Number(request.amount_minor)===0?"Бесплатно":money(Number(request.amount_minor),"RUB")}</p>
+   {request.status==="active"?<><p>Тариф Standard активирован без срока окончания и абонентской платы.</p><button className="primary wide" onClick={onDone}>Перейти в кабинет</button></>:<><p>Статус: ожидает подтверждения перевода.</p>{paymentDetails?<p style={{whiteSpace:"pre-wrap"}}>{paymentDetails}</p>:<p>Реквизиты для перевода уточни в поддержке.</p>}<button className="primary wide" onClick={()=>{const u="https://t.me/nikita_seton";if(window.Telegram?.WebApp?.openTelegramLink)window.Telegram.WebApp.openTelegramLink(u);else window.open(u,"_blank","noopener,noreferrer")}}>Написать в поддержку</button></>}
    <button className="secondary wide" onClick={back}>Назад</button>
   </div>:<div className="form-card">
    <input value={storeName} onChange={e=>setStoreName(e.target.value)} placeholder="Название магазина или имя" maxLength={100}/>
    <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Коротко о товарах (необязательно)" rows={4} maxLength={1000}/>
-   <div className="small" style={{fontWeight:800}}>ТАРИФ НА 30 ДНЕЙ</div>
-   <div className="menu"><button type="button" onClick={()=>setPlan("start")}><span>Старт · 199 ₽</span><b>{plan==="start"?"✓":"Выбрать"}</b></button><button type="button" onClick={()=>setPlan("standard")}><span>Стандарт · 399 ₽</span><b>{plan==="standard"?"✓":"Выбрать"}</b></button><button type="button" onClick={()=>setPlan("plus")}><span>Плюс · 699 ₽</span><b>{plan==="plus"?"✓":"Выбрать"}</b></button></div>
-   <input value={promo} onChange={e=>setPromo(e.target.value)} placeholder="Промокод (необязательно)"/>
-   <p className="small">Промокод можно указать, если он выдан поддержкой.</p>
-   <button className="primary wide" disabled={busy||storeName.trim().length<2} onClick={submit}>{busy?"Отправляем заявку…":"Оформить подписку"}</button>
+   <div className="small" style={{fontWeight:800}}>ТАРИФ</div>
+   <div className="menu"><button type="button" onClick={()=>setPlan("standard")}><span>Standard · Бесплатно</span><b>{plan==="standard"?"✓":"Выбрать"}</b></button><button type="button" onClick={()=>setPlan("start")}><span>Старт · 199 ₽ / 30 дней</span><b>{plan==="start"?"✓":"Выбрать"}</b></button><button type="button" onClick={()=>setPlan("plus")}><span>Плюс · 699 ₽ / 30 дней</span><b>{plan==="plus"?"✓":"Выбрать"}</b></button></div>
+   <button className="primary wide" disabled={busy||storeName.trim().length<2} onClick={submit}>{busy?"Создаём…":plan==="standard"?"Создать бесплатный кабинет":"Оформить платный тариф"}</button>
   </div>}
  </div>
 }
