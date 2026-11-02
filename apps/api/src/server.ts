@@ -297,6 +297,7 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
    const g=groups.get(p.seller_id)||{sellerId:p.seller_id,subtotal:0,fee:0,fulfillment:p.fulfillment_type,items:[]};g.subtotal+=line;g.fee+=fee;g.items.push({...item,title:p.title,price:Number(p.price_minor)});groups.set(p.seller_id,g);
    await c.query("update inventory set reserved=reserved+$1,updated_at=now() where product_id=$2",[item.quantity,p.id]);
   }
+  if(groups.size!==1)throw Object.assign(new Error("Один заказ может содержать товары только одного продавца. Заказы разных продавцов оформляются отдельно."),{statusCode:409});
   await c.query("update orders set total_minor=$1,platform_fee_minor=0,currency=$2,payment_currency=null,payment_amount_minor=null,fx_rate_rub_per_payment=null,payment_rate_locked_at=null,updated_at=now() where id=$3",[total,currency||'RUB',o.id]);
   // Product payments are settled directly between buyer and seller.
   for(const g of groups.values()){const so=(await c.query(`insert into seller_orders(order_id,seller_id,subtotal_minor,platform_fee_minor,seller_amount_minor,fulfillment_type) values($1,$2,$3,0,$3,$4) returning id`,[o.id,g.sellerId,g.subtotal,g.fulfillment])).rows[0];for(const item of g.items)await c.query("insert into order_items(seller_order_id,product_id,title_snapshot,unit_price_minor,quantity,total_minor) values($1,$2,$3,$4,$5,$6)",[so.id,item.productId,item.title,item.price,item.quantity,item.price*item.quantity]);}
