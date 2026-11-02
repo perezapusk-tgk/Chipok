@@ -356,7 +356,7 @@ function SellerOnboard({setMessage,onDone,back}:{setMessage:(s:string)=>void;onD
  return <div className="hero">
   <button className="icon-btn" onClick={back}>←</button>
   <h1>Стать продавцом</h1>
-  <p>Начни бесплатно на тарифе Standard. Оплата товаров проходит напрямую покупателем продавцу — Nookly не удерживает комиссию с продаж.</p>
+  <p>Создай магазин и размещай товары бесплатно. Покупатели оплачивают товары напрямую продавцу — Nookly не удерживает комиссию с продаж.</p>
   <div className="form-card">
    <input value={storeName} onChange={e=>setStoreName(e.target.value)} placeholder="Название магазина или имя" maxLength={100}/>
    <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Коротко о товарах (необязательно)" rows={4} maxLength={1000}/>
