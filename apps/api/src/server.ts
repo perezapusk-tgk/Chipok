@@ -804,7 +804,7 @@ app.post("/api/telegram/webhook",async(req,reply)=>{
      await telegramSendMessage(update.message.chat.id,"В Nookly нет абонентской платы и оплаты тарифов. Покупатель оплачивает товар напрямую продавцу по реквизитам, указанным в заказе. Продавец настраивает способ получения оплаты в своём кабинете Nookly.");
    } else if(command==="/balance"){
      await telegramSendMessage(update.message.chat.id,"Nookly не хранит деньги и не ведёт внутренний баланс. Покупатели переводят оплату напрямую продавцу; проверяйте поступление в своём банке.");
-
+   }
  }
  return {ok:true};
 });
