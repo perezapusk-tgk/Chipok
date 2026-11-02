@@ -116,7 +116,7 @@ export default function Home(){
     setCart([]);
     await loadOrders();
     setTab("orders");
-    setMessage("Заказ создан. Оплату и передачу товара согласуй напрямую с продавцом в чате Nookly.");
+    setMessage("Заказ создан. Открой чат с продавцом, согласуй детали и переведи оплату напрямую. Подтверди перевод в карточке заказа только после фактической оплаты.");
    }catch(e){
     setMessage(e instanceof Error?e.message:"Не удалось создать заказ");
    }finally{
@@ -199,6 +199,7 @@ function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}) {
    if(r.ok)setHandover((await r.json()).items||[]);
  }
 
+ async function confirmDirectPayment(){ if(!active)return; setBusy(true); setLocalMessage(''); try{ const init=typeof window!=='undefined'?window.Telegram?.WebApp?.initData||'':''; const r=await fetch(api()+'/api/orders/'+active.id+'/confirm-direct-payment',{method:'POST',headers:{Authorization:'tma '+init}}); if(!r.ok)throw new Error((await r.json()).error||'Не удалось подтвердить перевод'); setActive({...active,status:'paid',seller_orders:(active.seller_orders||[]).map((so:any)=>({...so,status:so.status==='created'?'paid':so.status}))}); onLoad(); setLocalMessage('Подтверждение сохранено. Продавцы получили уведомление.'); }catch(e){setLocalMessage(e instanceof Error?e.message:'Ошибка')}finally{setBusy(false)} }
  async function sendReview(){
    if(!reviewItem)return;
    setBusy(true);
@@ -232,7 +233,7 @@ function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}) {
    <div className="order-total">{money(Number(active.total_minor),active.currency)}</div>
    <div className="order-progress"><span className={["created","seller_confirmed","ready_for_handover","completed"].includes(active.status)?"done":""}>Заказ</span><span className={["seller_confirmed","ready_for_handover","completed"].includes(active.status)?"done":""}>Подтверждение</span><span className={["ready_for_handover","completed"].includes(active.status)?"done":""}>Получение</span><span className={active.status==="completed"?"done":""}>Завершено</span></div>
    <div className="small">{new Date(active.created_at).toLocaleString("ru-RU")}</div>
-   {active.status==="created"&&<div className="small">Продавец ещё не подтвердил наличие. После подтверждения можно согласовать оплату и получение напрямую.</div>}
+   {active.status==="created"&&<div className="form-card"><p>Сначала свяжись с продавцом в чате и согласуй детали. После фактического перевода оплаты продавцу нажми кнопку ниже.</p><button className="primary wide" disabled={busy} onClick={confirmDirectPayment}>{busy?"Подтверждаем…":"Я перевёл оплату продавцу"}</button></div>}
 
    <div className="menu order-sellers">
      {(active.seller_orders||[]).map((so:any)=><div className="order-seller" key={so.id}>
