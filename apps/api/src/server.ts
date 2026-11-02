@@ -275,36 +275,11 @@ app.post("/api/orders/:id/payment-order",async(req,reply)=>{
  await auth(req);
  return reply.code(410).send({error:"Оплата товаров через Nookly отключена. Покупатель и продавец рассчитываются напрямую."});
 });
-app.post("/webhooks/cashera",async(req:any,reply)=>{
- const apiKey=String(req.headers["x-api-key"]||"");
- const secret=String(req.headers["x-secret"]||"");
- if(!apiKey||!secret||!constantTimeEqual(apiKey,casheraApiKey())||!constantTimeEqual(secret,casheraSecret()))return reply.code(401).send({error:"Unauthorized"});
- const body=req.body as any;
- if(body?.event!=="transaction.status_updated")return reply.code(200).send({ok:true});
- try{
-   const tx=body.transaction;
-   if(tx?.status==="paid"){
-     const externalId=String(tx?.external_id||"");
-     const expected=(await pool.query("select amount_minor,currency,provider_transaction_uuid from payments where provider='cashera' and provider_external_id=$1",[externalId])).rows[0];
-     if(!expected)return reply.code(200).send({ok:true});
-     if(Number(expected.amount_minor)!==Number(tx.amount)||String(expected.currency).toUpperCase()!==String(tx.currency).toUpperCase())return reply.code(200).send({ok:true});
-   }
-   await applyCasheraTransactionStatus(body.transaction,body);
- }catch(error:any){
-   if(error?.statusCode===409)app.log.warn({error:"Cashera payment rejected by validation"},"Cashera webhook business validation failed");
-   else app.log.error({err:error},"Cashera webhook processing failed");
- }
- return reply.code(200).send({ok:true});
+app.post("/webhooks/cashera",async(_req,reply)=>{
+ return reply.code(410).send({error:"Cashera product payments are disabled. Buyer and seller settle directly."});
 });
-app.get("/api/admin/payments/:orderId/cashera-status",async(req,reply)=>{
- const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
- const orderId=z.string().uuid().parse((req.params as any).orderId);
- const local=(await pool.query("select p.provider_transaction_uuid,p.provider_external_id,o.total_minor,o.currency from payments p join orders o on o.id=p.order_id where p.order_id=$1 and p.provider='cashera'",[orderId])).rows[0];
- if(!local)return reply.code(404).send({error:"Cashera payment not found"});
- const tx=local.provider_transaction_uuid?await casheraRequest(`/integration/transactions/${encodeURIComponent(local.provider_transaction_uuid)}`,"GET"):await casheraRequest(`/integration/transactions/by-external-id/${encodeURIComponent(local.provider_external_id)}`,"GET");
- const snap=casheraTransactionSnapshot(tx);
- await applyCasheraTransactionStatus(tx);
- return {transaction:snap,orderId,expectedAmountMinor:Number(local.total_minor),expectedCurrency:String(local.currency).toUpperCase()};
+app.get("/api/admin/payments/:orderId/cashera-status",async(_req,reply)=>{
+ return reply.code(410).send({error:"Cashera product payments are disabled."});
 });
 app.get("/pay/ok",async(_req,reply)=>{const target=process.env.TELEGRAM_WEBAPP_URL?.trim();if(target)return reply.redirect(target);return reply.type("text/html").send("<!doctype html><title>Nookly</title><p>Оплата завершена. Вернитесь в Nookly.</p>");});
 app.get("/pay/fail",async(_req,reply)=>{const target=process.env.TELEGRAM_WEBAPP_URL?.trim();if(target)return reply.redirect(target);return reply.type("text/html").send("<!doctype html><title>Nookly</title><p>Оплата не завершена. Вернитесь в Nookly и попробуйте снова.</p>");});
@@ -485,7 +460,7 @@ app.post("/api/seller/onboard",async(req,reply)=>{
   await c.query("insert into stores(seller_id,name,description) values($1,$2,$3) on conflict(seller_id) do update set name=excluded.name,description=excluded.description",[user.id,body.storeName,body.description||null]);
   const pending=(await c.query("select id,status,plan,amount_minor,promo_code from seller_subscriptions where user_id=$1 and status='pending' order by created_at desc limit 1 for update",[user.id])).rows[0];
   if(pending)return pending;
-  let amount=plan.price;let promoCode:null|string=null;
+  let amount:number=plan.price;let promoCode:null|string=null;
   if(body.promoCode?.toUpperCase()==="START99"){
    const promo=(await c.query("select * from seller_subscription_promotions where code='START99' and active=true and redeemed_count<least(max_redemptions,5) for update")).rows[0];
    if(promo){amount=Number(promo.discount_amount_minor);promoCode="START99";await c.query("update seller_subscription_promotions set redeemed_count=redeemed_count+1 where code='START99'");}
