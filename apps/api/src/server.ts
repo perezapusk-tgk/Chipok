@@ -162,7 +162,7 @@ function encryptHandover(code:string){const iv=Buffer.from(randomUUID().replace(
 function decryptHandover(value:string){const [ivHex,tagHex,dataHex]=value.split(":");const decipher=createDecipheriv("aes-256-gcm",handoverKey(),Buffer.from(ivHex,"hex"));decipher.setAuthTag(Buffer.from(tagHex,"hex"));return Buffer.concat([decipher.update(Buffer.from(dataHex,"hex")),decipher.final()]).toString("utf8")}
 async function auth(request:any){
  const header=request.headers.authorization as string|undefined; const raw=header?.startsWith("tma ")?header.slice(4):"";
- if(!raw) throw Object.assign(new Error("Unauthorized"),{statusCode:401});
+ if(!raw) throw Object.assign(new Error("Откройте Nookly через Telegram, чтобы войти в аккаунт."),{statusCode:401});
  const user=validateTelegramInitData(raw,env("TELEGRAM_BOT_TOKEN"),Number(process.env.TELEGRAM_INIT_DATA_MAX_AGE||86400));
  const r=await pool.query(`insert into users(telegram_id,first_name,last_name,username,language_code,is_premium) values($1,$2,$3,$4,$5,$6) on conflict(telegram_id) do update set first_name=excluded.first_name,last_name=excluded.last_name,username=excluded.username,language_code=excluded.language_code,is_premium=excluded.is_premium,updated_at=now() returning id,telegram_id,first_name,last_name,username,language_code,is_premium,role`,[user.id,user.first_name,user.last_name??null,user.username??null,user.language_code??null,user.is_premium??false]);
  const adminTelegramId=process.env.ADMIN_TELEGRAM_ID?.trim();
@@ -198,7 +198,7 @@ async function configureTelegramWebhook(){
    }
    app.log.info({webhookUrl},"Telegram webhook registered");
   }
-  const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть Nookly"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь и документы"},{command:"terms",description:"Пользовательское соглашение"},{command:"privacy",description:"Политика конфиденциальности"},{command:"support",description:"Техническая поддержка"}]})});
+  const commands=await fetch(`https://api.telegram.org/bot${token}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"start",description:"Открыть Nookly"},{command:"shop",description:"Открыть каталог"},{command:"help",description:"Помощь и документы"},{command:"terms",description:"Пользовательское соглашение"},{command:"privacy",description:"Политика конфиденциальности"},{command:"support",description:"Техническая поддержка"},{command:"requisites",description:"Реквизиты оплаты подписки"}]})});
   const commandsData=await commands.json() as {ok:boolean;description?:string};
   if(!commandsData.ok)app.log.warn({description:commandsData.description},"Telegram commands registration failed");
   const webAppUrl=process.env.TELEGRAM_WEBAPP_URL;
@@ -720,6 +720,22 @@ app.post("/api/telegram/webhook",async(req,reply)=>{
      await telegramSendMessage(update.message.chat.id,"Политика конфиденциальности Nookly. Откройте документ по кнопке ниже.",{inline_keyboard:[[ {text:"🔐 Открыть политику",url:privacyUrl} ]]});
    } else if(command==="/support"){
      await telegramSendMessage(update.message.chat.id,"Техническая поддержка Nookly. Напишите нам, если возникли вопросы по заказу, оплате или работе приложения.",{inline_keyboard:[[ {text:"💬 Написать в поддержку",url:supportUrl} ]]});
+   } else if(command==="/requisites"||command==="/card"){
+     const u=(await pool.query("select id from users where telegram_id=$1",[update.message.from.id])).rows[0];
+     if(!u){
+       await telegramSendMessage(update.message.chat.id,"Сначала откройте Nookly через /start, войдите в приложение и оформите заявку продавца. Затем запросите реквизиты командой /requisites.");
+     } else {
+       const pending=(await pool.query("select plan,amount_minor from seller_subscriptions where user_id=$1 and status='pending' order by created_at desc limit 1",[u.id])).rows[0];
+       const details=process.env.SELLER_SUBSCRIPTION_PAYMENT_DETAILS?.trim();
+       if(!pending){
+         await telegramSendMessage(update.message.chat.id,"У вас нет ожидающей оплаты подписки. Сначала оформите заявку продавца в Nookly.");
+       } else if(!details){
+         await telegramSendMessage(update.message.chat.id,"Реквизиты временно недоступны. Напишите в поддержку: https://t.me/nikita_seton");
+       } else {
+         const planName=pending.plan==="start"?"Старт":pending.plan==="standard"?"Стандарт":"Плюс";
+         await telegramSendMessage(update.message.chat.id,"Реквизиты для оплаты подписки Nookly\\nТариф: "+planName+"\\nСумма: "+(Number(pending.amount_minor)/100).toFixed(2)+" ₽\\n\\n"+details+"\\n\\nПосле перевода дождитесь подтверждения администратором. Не отправляйте PIN, CVV/CVC или коды из SMS.");
+       }
+     }
    } else if(command==="/balance"){
      const u=(await pool.query("select id from users where telegram_id=$1",[update.message.from.id])).rows[0];
      if(!u){
