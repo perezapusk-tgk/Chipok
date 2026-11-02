@@ -326,6 +326,7 @@ function Profile({user,sellerProducts,setSellerProducts,loadSeller,setMessage,ca
     <button onClick={favorites}><span>Избранное</span><span>♡ ›</span></button>
     {seller&&<button onClick={()=>{loadSeller();setMode("seller")}}><span>Кабинет продавца</span><span>›</span></button>}
     {!seller&&!admin&&<button onClick={()=>setMode("onboard")}><span>Стать продавцом</span><span>›</span></button>}
+    {admin&&<button onClick={()=>setMode("onboard")}><span>Тест регистрации и оплаты продавца</span><span>›</span></button>}
     <button onClick={()=>setMode("notifications")}><span>Уведомления</span><span>{unread?unread+" новых":"›"}</span></button>
     {admin&&<button onClick={()=>setMode("admin")}><span>Админ-панель</span><span>›</span></button>}
     <button onClick={()=>setMessage("Безопасная оплата проходит через подключённый платёжный сервис. Nookly не удерживает комиссию с продаж. Доступ продавца оплачивается по подписке.")}><span>Оплата и безопасность</span><span>›</span></button>
