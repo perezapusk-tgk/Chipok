@@ -232,7 +232,7 @@ app.get("/api/products/:id",async(req,reply)=>{
 app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req); const body=z.object({items:z.array(z.object({productId:z.string().uuid(),quantity:z.number().int().min(1).max(100)})).min(1).max(100).superRefine((items,ctx)=>{const seen=new Set<string>();items.forEach((item,index)=>{if(seen.has(item.productId))ctx.addIssue({code:z.ZodIssueCode.custom,path:[index,"productId"],message:"Товар указан несколько раз"});seen.add(item.productId)})})}).parse(req.body);
  const order=await withTransaction(async(c)=>{
-  const bps=Math.max(0,Math.min(10000,Number(process.env.PLATFORM_COMMISSION_BPS||500)));
+  const bps=0; // Direct buyer-seller settlement; Nookly charges no sales commission.
   const o=(await c.query("insert into orders(buyer_id,status,total_minor,platform_fee_minor,expires_at) values($1,'created',0,0,now()+interval '30 minutes') returning id",[buyer.id])).rows[0];
   const groups=new Map<string,any>();let total=0,feeTotal=0;let currency:string|null=null;
   for(const item of body.items){
@@ -248,85 +248,16 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
    const g=groups.get(p.seller_id)||{sellerId:p.seller_id,subtotal:0,fee:0,fulfillment:p.fulfillment_type,items:[]};g.subtotal+=line;g.fee+=fee;g.items.push({...item,title:p.title,price:Number(p.price_minor)});groups.set(p.seller_id,g);
    await c.query("update inventory set reserved=reserved+$1,updated_at=now() where product_id=$2",[item.quantity,p.id]);
   }
-  await c.query("update orders set total_minor=$1,platform_fee_minor=$2,currency=$3,payment_currency=null,payment_amount_minor=null,fx_rate_rub_per_payment=null,payment_rate_locked_at=null,updated_at=now() where id=$4",[total,feeTotal,currency||'RUB',o.id]);
-  await c.query("insert into payments(order_id,provider,status,amount_minor,currency) values($1,'cashera','pending',$2,'RUB') on conflict(order_id) do update set provider='cashera',status='pending',amount_minor=excluded.amount_minor,currency='RUB',updated_at=now()",[o.id,total]);
-  for(const g of groups.values()){const so=(await c.query(`insert into seller_orders(order_id,seller_id,subtotal_minor,platform_fee_minor,seller_amount_minor,fulfillment_type) values($1,$2,$3,$4,$3::bigint-$4::bigint,$5) returning id`,[o.id,g.sellerId,g.subtotal,g.fee,g.fulfillment])).rows[0];for(const item of g.items)await c.query("insert into order_items(seller_order_id,product_id,title_snapshot,unit_price_minor,quantity,total_minor) values($1,$2,$3,$4,$5,$6)",[so.id,item.productId,item.title,item.price,item.quantity,item.price*item.quantity]);}
-  return {id:o.id,totalMinor:total,platformFeeMinor:feeTotal,paymentCurrency:"RUB",paymentAmountMinor:total,fxRateRubPerPayment:null};
+  await c.query("update orders set status='paid',total_minor=$1,platform_fee_minor=0,currency=$3,payment_currency=null,payment_amount_minor=null,fx_rate_rub_per_payment=null,payment_rate_locked_at=null,updated_at=now() where id=$4",[total,feeTotal,currency||'RUB',o.id]);
+  // Product payments are settled directly between buyer and seller.
+  for(const g of groups.values()){const so=(await c.query(`insert into seller_orders(order_id,seller_id,subtotal_minor,platform_fee_minor,seller_amount_minor,fulfillment_type,status) values($1,$2,$3,0,$3,$4,'paid') returning id`,[o.id,g.sellerId,g.subtotal,g.fee,g.fulfillment])).rows[0];for(const item of g.items)await c.query("insert into order_items(seller_order_id,product_id,title_snapshot,unit_price_minor,quantity,total_minor) values($1,$2,$3,$4,$5,$6)",[so.id,item.productId,item.title,item.price,item.quantity,item.price*item.quantity]);}
+  return {id:o.id,totalMinor:total,platformFeeMinor:0,paymentRequired:false,settlement:"direct_with_seller"};
  }); return reply.code(201).send({order});
 });
 app.post("/api/orders/:id/payment-order",async(req,reply)=>{
- const buyer=await auth(req);
- const id=z.string().uuid().parse((req.params as any).id);
- const methodBody=z.object({paymentMethod:z.string().trim().min(2).max(50).optional()}).safeParse(req.body||{});
- const paymentMethod=methodBody.success&&methodBody.data.paymentMethod?methodBody.data.paymentMethod:casheraPaymentMethod();
- const locked=await withTransaction(async(c)=>{
-   const order=(await c.query("select * from orders where id=$1 and buyer_id=$2 for update",[id,buyer.id])).rows[0];
-   if(!order)return null;
-   if(order.status!=="created")throw Object.assign(new Error("Заказ уже нельзя оплатить на этом этапе"),{statusCode:409});
-   if(String(order.currency).toUpperCase()!=="RUB")throw Object.assign(new Error("Only RUB orders can be paid through checkout"),{statusCode:409});
-   let payment=(await c.query("select * from payments where order_id=$1 for update",[id])).rows[0];
-   if(payment?.provider==="cashera"&&payment.provider_transaction_uuid&&payment.invoice_link){
-     return {orderId:id,paymentId:payment.id,totalMinor:Number(order.total_minor),paymentAmountMinor:Number(payment.amount_minor),currency:"RUB",providerUuid:String(payment.provider_transaction_uuid),externalId:String(payment.provider_external_id||id),paymentUrl:String(payment.invoice_link),status:String(payment.provider_status||payment.status),paymentMethod:String(payment.provider_payload?.payment_method||paymentMethod)};
-   }
-   if(payment&&payment.provider!=="cashera"){
-     payment=(await c.query("update payments set provider='cashera',status='pending',amount_minor=$2,currency='RUB',invoice_link=null,provider_invoice_id=null,provider_payload=null,updated_at=now() where id=$1 returning *",[payment.id,Number(order.total_minor)])).rows[0];
-   }
-   if(!payment){
-     payment=(await c.query("insert into payments(order_id,provider,status,amount_minor,currency) values($1,'cashera','pending',$2,'RUB') returning *",[id,Number(order.total_minor)])).rows[0];
-   }
-   return {orderId:id,paymentId:payment.id,totalMinor:Number(order.total_minor),paymentAmountMinor:Number(order.total_minor),currency:"RUB",providerUuid:payment.provider_transaction_uuid?String(payment.provider_transaction_uuid):null,externalId:String(payment.provider_external_id||id),paymentUrl:payment.invoice_link||null,status:String(payment.provider_status||payment.status),paymentMethod};
- });
- if(!locked)return reply.code(404).send({error:"Order not found"});
- if(locked.paymentUrl)return {configured:true,...locked};
- validateHttpsUrl(casheraCallbackUrl(),"CASHERA_CALLBACK_URL");
- const successUrl=validateHttpsUrl(casheraSuccessUrl(),"CASHERA_SUCCESS_URL");
- const failUrl=validateHttpsUrl(casheraFailUrl(),"CASHERA_FAIL_URL");
- const externalId=locked.externalId;
- const tx=await casheraRequest("/integration/transactions","POST",{
-   amount:locked.paymentAmountMinor,
-   currency:"RUB",
-   ...(locked.paymentMethod?{payment_method:locked.paymentMethod}:{}),
-   external_id:externalId,
-   description:`Nookly order ${locked.orderId}`,
-   callback_url:casheraCallbackUrl(),
-   success_url:successUrl,
-   fail_url:failUrl
- });
- const snap=casheraTransactionSnapshot(tx);
- if(!snap.uuid||!snap.paymentUrl)throw Object.assign(new Error("Cashera did not return transaction uuid/payment_url"),{statusCode:502});
- const saved=await pool.query(`update payments set provider='cashera',provider_payment_id=$2,provider_invoice_id=$2,provider_external_id=$3,provider_transaction_uuid=$2,provider_status=$4,provider_paid_at=$5,provider_created_at=$6,provider_updated_at=$7,amount_minor=$8,currency='RUB',invoice_link=$9,provider_payload=$10,updated_at=now() where id=$1 returning *`,[locked.paymentId,snap.uuid,snap.externalId||externalId,snap.status,snap.paidAt,snap.createdAt,snap.updatedAt,snap.amount,snap.paymentUrl,JSON.stringify(tx)]);
- return {configured:true,orderId:locked.orderId,paymentId:locked.paymentId,totalMinor:locked.totalMinor,paymentAmountMinor:locked.paymentAmountMinor,currency:"RUB",providerUuid:snap.uuid,externalId:snap.externalId||externalId,paymentUrl:snap.paymentUrl,status:snap.status,paymentMethod:snap.paymentMethod||locked.paymentMethod};
+ await auth(req);
+ return reply.code(410).send({error:"Оплата товаров через Nookly отключена. Покупатель и продавец рассчитываются напрямую."});
 });
-
-async function applyCasheraTransactionStatus(tx:any,sourcePayload?:unknown){
- const snap=casheraTransactionSnapshot(tx);
- if(!snap.uuid||!snap.externalId||!snap.status)return {ok:true,ignored:true};
- return withTransaction(async(c)=>{
-   const payment=(await c.query("select p.*,o.buyer_id,o.status as order_status,o.total_minor,o.currency as order_currency from payments p join orders o on o.id=p.order_id where p.provider='cashera' and p.provider_external_id=$1 for update",[snap.externalId])).rows[0];
-   if(!payment)return {ok:true,ignored:true,reason:"unknown_external_id"};
-   const eventKey=`cashera:${snap.uuid}:${snap.status}`;
-   const seen=await c.query("select 1 from payment_transactions where idempotency_key=$1",[eventKey]);
-   if(seen.rowCount)return {ok:true,alreadyProcessed:true};
-   await c.query("insert into payment_transactions(payment_id,idempotency_key,provider_event_id,event_type,payload) values($1,$2,$3,'transaction.status_updated',$4)",[payment.id,eventKey,eventKey,JSON.stringify(sourcePayload||tx)]);
-   await c.query("update payments set provider_payment_id=$2,provider_invoice_id=$2,provider_transaction_uuid=$2,provider_status=$3,provider_paid_at=$4,provider_created_at=coalesce(provider_created_at,$5),provider_updated_at=$6,amount_minor=$7,currency=$8,status=case when $3 in ('paid','refunded','chargeback','canceled','failed','expired') then $3 else status end,updated_at=now() where id=$1",[payment.id,snap.uuid,snap.status,snap.paidAt,snap.createdAt,snap.updatedAt,snap.amount,snap.currency]);
-   if(snap.status==="paid"){
-     if(snap.currency!=="RUB"||snap.amount!==Number(payment.total_minor))throw Object.assign(new Error("Cashera paid amount/currency mismatch"),{statusCode:409});
-     if(payment.order_status==="created"){
-       await c.query("update seller_orders set status='paid' where order_id=$1 and status='created'",[payment.order_id]);
-       await c.query("update orders set status='paid',updated_at=now() where id=$1 and status='created'",[payment.order_id]);
-       await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_paid','Оплата подтверждена',$2)",[payment.buyer_id,`Заказ оплачен: ${(Number(payment.total_minor)/100).toFixed(2)} ₽. Продавец получил уведомление.`]);
-       await c.query("insert into notifications(user_id,type,title,body) select so.seller_id,'new_paid_order','Новый оплаченный заказ',$2 from seller_orders so where so.order_id=$1",[payment.order_id,`Получена оплата за заказ на ${(Number(payment.total_minor)/100).toFixed(2)} ₽. Подтвердите наличие товара.`]);
-     } else if(["cancelled","refunded","disputed"].includes(payment.order_status)){
-       await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_paid_late','Оплата подтверждена после изменения заказа',$2)",[payment.buyer_id,`Cashera подтвердил оплату заказа ${payment.order_id}, но заказ уже имеет статус «${payment.order_status}». Обратитесь в поддержку для сверки.`]);
-     }
-   } else if(["refunded","chargeback"].includes(String(snap.status))){
-     if(payment.order_status!=="refunded")await c.query("update orders set status=case when $2='refunded' then 'refunded' else 'disputed' end,updated_at=now() where id=$1",[payment.order_id,snap.status]);
-     await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_reversed','Статус оплаты изменён',$2)",[payment.buyer_id,`Cashera сообщил статус «${snap.status}» для заказа ${payment.order_id}. Выплата продавцу требует сверки.`]);
-   }
-   return {ok:true,status:snap.status,orderId:payment.order_id};
- });
-}
-
 app.post("/webhooks/cashera",async(req:any,reply)=>{
  const apiKey=String(req.headers["x-api-key"]||"");
  const secret=String(req.headers["x-secret"]||"");
