@@ -287,7 +287,7 @@ function Orders({orders,onLoad}:{orders:Order[];onLoad:()=>void}) {
  </div>;
 }
 
-function statusRu(s:string){return ({created:"Ожидает оплаты",paid:"Оплачен",seller_confirmed:"Продавец подтвердил",ready_for_handover:"Готов к получению",completed:"Завершён",cancelled:"Отменён",refunded:"Возврат",refund_pending:"Возврат ожидает подтверждения",disputed:"Спор",draft:"Черновик",published:"Опубликован",archived:"Архив"} as Record<string,string>)[s]||s}
+function statusRu(s:string){return ({created:"Ожидает оплаты",paid:"Покупатель сообщил об оплате",seller_confirmed:"Продавец подтвердил",ready_for_handover:"Готов к получению",completed:"Завершён",cancelled:"Отменён",refunded:"Возврат",refund_pending:"Возврат ожидает подтверждения",disputed:"Спор",draft:"Черновик",published:"Опубликован",archived:"Архив"} as Record<string,string>)[s]||s}
 
 function Profile({user,sellerProducts,setSellerProducts,loadSeller,setMessage,categories,notifications,readNotification,openProduct}:{user:User|null;sellerProducts:any[];setSellerProducts:Dispatch<SetStateAction<any[]>>;loadSeller:()=>void;setMessage:(s:string)=>void;categories:any[];notifications:any[];readNotification:(id:string)=>Promise<void>;openProduct:(id:string)=>Promise<void>}){
  const admin=user?.role==="admin";
