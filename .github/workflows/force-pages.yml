@@ -1,8 +1,6 @@
-name: Force GitHub Pages
+name: Manual GitHub Pages redeploy
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
