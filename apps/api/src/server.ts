@@ -435,7 +435,7 @@ app.get("/api/seller/payment-settings",async(req)=>{
 });
 app.put("/api/seller/payment-settings",async(req,reply)=>{
  const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
- const body=z.object({paymentMethod:z.enum(["sbp","card","link"]),paymentDetails:z.string().trim().max(500).optional().nullable(),paymentRecipient:z.string().trim().max(120).optional().nullable(),paymentBank:z.string().trim().max(120).optional().nullable(),paymentLink:z.string().trim().url().max(500).optional().nullable()}).parse(req.body);
+ const body=z.object({paymentMethod:z.enum(["sbp","card","link"]),paymentDetails:z.string().trim().max(500).optional().nullable(),paymentRecipient:z.string().trim().max(120).optional().nullable(),paymentBank:z.string().trim().max(120).optional().nullable(),paymentLink:z.string().trim().url().max(500).refine(v=>v.startsWith("https://"),"Ссылка оплаты должна использовать HTTPS").optional().nullable()}).parse(req.body);
  if(body.paymentMethod==="link"&&!body.paymentLink)return reply.code(400).send({error:"Добавьте ссылку на оплату"});
  if(body.paymentMethod!=="link"&&!body.paymentDetails)return reply.code(400).send({error:"Добавьте номер телефона СБП или номер карты"});
  const r=await pool.query("update seller_profiles set payment_method=$2,payment_details=$3,payment_recipient=$4,payment_bank=$5,payment_link=$6 where user_id=$1 returning payment_method,payment_details,payment_recipient,payment_bank,payment_link",[seller.id,body.paymentMethod,body.paymentDetails||null,body.paymentRecipient||null,body.paymentBank||null,body.paymentLink||null]);
@@ -719,7 +719,7 @@ app.get("/api/seller/products",async(req)=>{
 app.patch("/api/seller/products/:id",async(req,reply)=>{
  const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
  const id=z.string().uuid().parse((req.params as any).id);
- const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().refine(v=>v.startsWith("data:image/")||v.startsWith("https://"),"Invalid image URL").optional()}).parse(req.body);
+ const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().max(2_800_000).refine(v=>v.startsWith("data:image/")||v.startsWith("https://"),"Invalid image URL").optional()}).parse(req.body);
  const updated=await withTransaction(async(c)=>{
   const p=(await c.query("select id,status,coalesce((select reserved from inventory where product_id=products.id),0) as reserved from products where id=$1 and seller_id=$2 for update",[id,seller.id])).rows[0];
   if(!p)return {kind:"not_found" as const};
