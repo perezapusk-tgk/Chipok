@@ -7,6 +7,8 @@ import { validateTelegramInitData } from "./telegram.js";
 import { OrderService } from "./services/order-service.js";
 
 type OrderTelegramEvent="created"|"paid"|"seller_confirmed"|"seller_cancelled"|"ready"|"completed"|"expired";
+type OrderTelegramEvent="created"|"paid"|"seller_confirmed"|"seller_cancelled"|"ready"|"completed"|"expired";
+function telegramHtmlEscape(value:unknown):string{return String(value??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 async function notifyOrderTelegram(orderId:string,event:OrderTelegramEvent,sellerOrderId?:string){
  try{
   const result=await pool.query(`
@@ -25,38 +27,42 @@ async function notifyOrderTelegram(orderId:string,event:OrderTelegramEvent,selle
   `,[orderId,sellerOrderId||null]);
   const rows=result.rows as any[];if(!rows.length)return;
   const first=rows[0],shortId=String(orderId).slice(0,8).toUpperCase();
-  const money=(n:number)=>((Number(n)||0)/100).toFixed(2)+" ₽";
-  const itemLines=(r:any)=>r.items||"Состав заказа уточняется";
-  const send=async(chatId:any,message:string)=>{if(chatId)try{await telegramSendMessage(chatId,message)}catch(error){app.log.warn({err:error,orderId,event},"Telegram order notification failed")}};
+  const money=(n:number)=>((Number(n)||0)/100).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2})+" ₽";
+  const safe=(v:unknown)=>telegramHtmlEscape(v);
+  const items=(r:any)=>safe(r.items||"Состав заказа уточняется").replace(/\\n/g,"\n");
+  const webAppUrl=process.env.TELEGRAM_WEBAPP_URL?.trim();
+  const keyboard=webAppUrl?{inline_keyboard:[[{text:"🛍 Открыть Nookly",web_app:{url:webAppUrl}}]]}:undefined;
+  const send=async(chatId:any,message:string)=>{if(chatId)try{await telegramSendMessage(chatId,message,keyboard,"HTML")}catch(error){app.log.warn({err:error,orderId,event},"Telegram order notification failed")}};
   if(event==="created"){
-   const allItems=rows.map(r=>r.store_name+":\n"+itemLines(r)).join("\n\n");
-   await send(first.buyer_telegram_id,"🛍 Заказ оформлен!\nЗаказ №"+shortId+"\n\n"+allItems+"\n\nСумма: "+money(first.total_minor)+"\n\nОжидайте подтверждения продавца в Nookly.");
-   for(const r of rows)await send(r.seller_telegram_id,"🆕 Новый заказ!\nЗаказ №"+shortId+"\nМагазин: "+r.store_name+"\n\n"+itemLines(r)+"\n\nСумма ваших товаров: "+money(r.subtotal_minor)+"\nПокупатель: "+(first.buyer_name||"Покупатель")+"\n\nОткройте Nookly → Заказы и подтвердите наличие товара.");
+   const allItems=rows.map(r=>"<b>"+safe(r.store_name)+"</b>\n"+items(r)).join("\n\n");
+   await send(first.buyer_telegram_id,"🛍 <b>Заказ оформлен!</b>\n━━━━━━━━━━━━━━\n🔖 Заказ <code>№"+shortId+"</code>\n\n"+allItems+"\n\n💰 <b>Итого: "+money(first.total_minor)+"</b>\n\n<i>Следите за статусом заказа в Nookly. Мы сообщим, когда продавец ответит.</i>");
+   for(const r of rows)await send(r.seller_telegram_id,"🆕 <b>Новый заказ в вашем магазине!</b>\n━━━━━━━━━━━━━━\n🔖 Заказ <code>№"+shortId+"</code>\n🏪 <b>"+safe(r.store_name)+"</b>\n\n📦 <b>Состав заказа</b>\n"+items(r)+"\n\n💰 К получению: <b>"+money(r.subtotal_minor)+"</b>\n👤 Покупатель: "+safe(first.buyer_name||"Покупатель")+"\n\n<i>Откройте раздел «Заказы», проверьте поступление оплаты и подтвердите заказ.</i>");
    return;
   }
   for(const r of rows){
-   if(event==="paid")await send(r.seller_telegram_id,"💳 Покупатель отметил оплату заказа №"+shortId+".\nМагазин: "+r.store_name+"\n"+itemLines(r)+"\n\nПроверьте поступление денег и подтвердите заказ в Nookly.");
-   if(event==="seller_confirmed")await send(first.buyer_telegram_id,"✅ Продавец подтвердил заказ №"+shortId+".\nМагазин: "+r.store_name+"\n"+itemLines(r)+"\n\nОжидайте уведомления о готовности к получению.");
-   if(event==="seller_cancelled")await send(first.buyer_telegram_id,"⚠️ Продавец отменил заказ №"+shortId+".\nМагазин: "+r.store_name+"\nЗаказ передан на рассмотрение возврата. Подробности доступны в Nookly.");
-   if(event==="ready")await send(first.buyer_telegram_id,"📦 Заказ №"+shortId+" готов к получению!\nМагазин: "+r.store_name+"\n"+itemLines(r)+"\n\nОткройте раздел «Заказы» в Nookly, чтобы посмотреть код получения.");
+   if(event==="paid")await send(r.seller_telegram_id,"💳 <b>Покупатель отметил оплату</b>\n━━━━━━━━━━━━━━\n🔖 Заказ <code>№"+shortId+"</code>\n🏪 "+safe(r.store_name)+"\n"+items(r)+"\n\n💰 Сумма: <b>"+money(r.subtotal_minor)+"</b>\n\n⚠️ <i>Проверьте фактическое поступление денег и только после этого подтвердите заказ в Nookly.</i>");
+   if(event==="seller_confirmed")await send(first.buyer_telegram_id,"✅ <b>Продавец подтвердил заказ</b>\n━━━━━━━━━━━━━━\n🔖 Заказ <code>№"+shortId+"</code>\n🏪 "+safe(r.store_name)+"\n"+items(r)+"\n\n<i>Продавец готовит ваш заказ. Мы сообщим, когда его можно будет забрать.</i>");
+   if(event==="seller_cancelled")await send(first.buyer_telegram_id,"⚠️ <b>Продавец отменил заказ</b>\n━━━━━━━━━━━━━━\n🔖 Заказ <code>№"+shortId+"</code>\n🏪 "+safe(r.store_name)+"\n\n<i>Заказ передан на рассмотрение. Откройте Nookly, чтобы посмотреть подробности и информацию о возврате.</i>");
+   if(event==="ready")await send(first.buyer_telegram_id,"📦 <b>Ваш заказ готов!</b>\n━━━━━━━━━━━━━━\n🔖 Заказ <code>№"+shortId+"</code>\n🏪 "+safe(r.store_name)+"\n"+items(r)+"\n\n🎟 <b>Код получения находится в разделе «Заказы».</b> Покажите его продавцу при получении.");
    if(event==="completed"){
-    await send(first.buyer_telegram_id,"🎉 Заказ №"+shortId+" завершён.\nМагазин: "+r.store_name+"\nСпасибо за покупку в Nookly!");
-    await send(r.seller_telegram_id,"🎉 Заказ №"+shortId+" успешно завершён.\n"+itemLines(r)+"\nПродажа учтена в статистике магазина.");
+    await send(first.buyer_telegram_id,"🎉 <b>Заказ успешно завершён!</b>\n━━━━━━━━━━━━━━\n🔖 Заказ <code>№"+shortId+"</code>\n🏪 "+safe(r.store_name)+"\n\nСпасибо, что выбираете Nookly 💙");
+    await send(r.seller_telegram_id,"🎉 <b>Заказ завершён!</b>\n━━━━━━━━━━━━━━\n🔖 Заказ <code>№"+shortId+"</code>\n"+items(r)+"\n\nПродажа учтена в статистике вашего магазина. Отличной торговли! 💙");
    }
-   if(event==="expired"){
-    await send(r.seller_telegram_id,"⌛ Заказ №"+shortId+" отменён: покупатель не подтвердил оплату вовремя. Резерв товара снят.");
-   }
+   if(event==="expired")await send(r.seller_telegram_id,"⌛ <b>Заказ отменён по времени</b>\n━━━━━━━━━━━━━━\n🔖 Заказ <code>№"+shortId+"</code>\n\nПокупатель не подтвердил оплату в установленный срок. Резерв товара снят.");
   }
-  if(event==="expired")await send(first.buyer_telegram_id,"⌛ Заказ №"+shortId+" отменён: время ожидания оплаты истекло. Резерв товара снят.");
+  if(event==="expired")await send(first.buyer_telegram_id,"⌛ <b>Время оплаты истекло</b>\n━━━━━━━━━━━━━━\n🔖 Заказ <code>№"+shortId+"</code>\n\nЗаказ отменён, резерв товара снят. Если вы уже перевели деньги, свяжитесь с продавцом и поддержкой Nookly.");
  }catch(error){app.log.warn({err:error,orderId,event},"Unable to prepare Telegram order notification")}
 }
-
-async function telegramSendMessage(chatId:number|string,text:string,replyMarkup?:Record<string,unknown>){
+async function telegramSendMessage(chatId:number|string,text:string,replyMarkup?:Record<string,unknown>,parseMode?:"HTML"){
  const token=process.env.TELEGRAM_BOT_TOKEN;
  if(!token)return;
  const body:Record<string,unknown>={chat_id:chatId,text,disable_web_page_preview:true};
  if(replyMarkup)body.reply_markup=replyMarkup;
- await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+ if(parseMode)body.parse_mode=parseMode;
+ const response=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+ if(!response.ok){const detail=await response.text().catch(()=>"");throw new Error(`Telegram sendMessage failed: ${response.status} ${detail.slice(0,300)}`);}
+ const data:any=await response.json().catch(()=>null);
+ if(data&&data.ok===false)throw new Error(`Telegram sendMessage rejected: ${data.description||"unknown error"}`);
 }
 
 import { runMigrations } from "./migrate.js";
