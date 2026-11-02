@@ -103,19 +103,23 @@ export default function Home(){
    if(!tg?.initData){setMessage("Открой Nookly внутри Telegram.");return}
    setLoading(true);setMessage("");
    try{
-    const grouped=Object.values(cart.reduce((a,p)=>{a[p.id]=(a[p.id]||{productId:p.id,quantity:0});a[p.id].quantity++;return a},{} as Record<string,{productId:string;quantity:number}>));
-    const r=await fetch(api()+"/api/orders",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({items:grouped})});
-    if(!r.ok)throw new Error((await r.json()).error||"Не удалось создать заказ");
-    const created=await r.json();
-    const sellers=new Map<string,string>();
-    cart.forEach(p=>{if(p.seller_id&&!sellers.has(p.seller_id))sellers.set(p.seller_id,p.id)});
-    for(const [sellerId,productId] of sellers){
-      await fetch(api()+"/api/chat/threads",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({sellerId,productId})});
+    const bySeller=new Map<string,Product[]>();
+    for(const p of cart){
+      if(!p.seller_id)throw new Error("Не удалось определить продавца одного из товаров. Обнови каталог.");
+      const group=bySeller.get(p.seller_id)||[];group.push(p);bySeller.set(p.seller_id,group);
+    }
+    for(const [sellerId,productsForSeller] of bySeller){
+      const quantities=new Map<string,number>();
+      productsForSeller.forEach(p=>quantities.set(p.id,(quantities.get(p.id)||0)+1));
+      const items=Array.from(quantities.entries()).map(([productId,quantity])=>({productId,quantity}));
+      const r=await fetch(api()+"/api/orders",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({items})});
+      if(!r.ok)throw new Error((await r.json()).error||"Не удалось создать заказ");
+      await fetch(api()+"/api/chat/threads",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({sellerId,productId:productsForSeller[0].id})});
     }
     setCart([]);
     await loadOrders();
     setTab("orders");
-    setMessage("Заказ создан. Открой чат с продавцом, согласуй детали и переведи оплату напрямую. Подтверди перевод в карточке заказа только после фактической оплаты.");
+    setMessage("Заказы созданы отдельно для каждого продавца. Открой чат, согласуй детали и переведи оплату напрямую.");
    }catch(e){
     setMessage(e instanceof Error?e.message:"Не удалось создать заказ");
    }finally{
