@@ -102,6 +102,8 @@ export default function Home(){
    if(!cart.length)return;
    if(!tg?.initData){setMessage("Открой Nookly внутри Telegram.");return}
    setLoading(true);setMessage("");
+   const createdSellerIds=new Set<string>();
+   let chatWarning=false;
    try{
     const bySeller=new Map<string,Product[]>();
     for(const p of cart){
@@ -114,14 +116,24 @@ export default function Home(){
       const items=Array.from(quantities.entries()).map(([productId,quantity])=>({productId,quantity}));
       const r=await fetch(api()+"/api/orders",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({items})});
       if(!r.ok)throw new Error((await r.json()).error||"Не удалось создать заказ");
-      await fetch(api()+"/api/chat/threads",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({sellerId,productId:productsForSeller[0].id})});
+      createdSellerIds.add(sellerId);
+      setCart(prev=>prev.filter(p=>p.seller_id!==sellerId));
+      try{
+        const chat=await fetch(api()+"/api/chat/threads",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({sellerId,productId:productsForSeller[0].id})});
+        if(!chat.ok)chatWarning=true;
+      }catch{chatWarning=true}
     }
-    setCart([]);
     await loadOrders();
     setTab("orders");
-    setMessage("Заказы созданы отдельно для каждого продавца. Открой чат, согласуй детали и переведи оплату напрямую.");
+    setMessage(chatWarning?"Заказы созданы отдельно для каждого продавца. Если чат не появился, открой раздел «Чаты» и обнови список.":"Заказы созданы отдельно для каждого продавца. Переводи оплату каждому продавцу по реквизитам в заказе.");
    }catch(e){
-    setMessage(e instanceof Error?e.message:"Не удалось создать заказ");
+    if(createdSellerIds.size){
+      await loadOrders();
+      setTab("orders");
+      setMessage("Часть заказов уже создана. Остальные товары оставлены в корзине. "+(e instanceof Error?e.message:"Не удалось создать оставшиеся заказы."));
+    }else{
+      setMessage(e instanceof Error?e.message:"Не удалось создать заказ");
+    }
    }finally{
     setLoading(false);
    }
@@ -160,7 +172,7 @@ export default function Home(){
 function Cart({cart,total,setCart,checkout,loading}:{cart:Product[];total:number;setCart:Dispatch<SetStateAction<Product[]>>;checkout:()=>Promise<void>;loading:boolean}){
  const groups=Object.values(cart.reduce<Record<string,{p:Product;count:number}>>((a,p)=>{const k=p.id;a[k]=a[k]||{p,count:0};a[k].count++;return a},{}));
  const change=(id:string,delta:number)=>setCart(prev=>{const next=[...prev];if(delta>0){const p=prev.find(x=>x.id===id);if(p&&next.filter(x=>x.id===id).length<Number(p.available_stock??0))next.push(p)}else{const i=next.findIndex(x=>x.id===id);if(i>=0)next.splice(i,1)}return next});
- return <div className="hero cart-page"><div className="chat-head"><div><h1>Корзина</h1><span className="small">{cart.length} товаров</span></div></div>{groups.length?groups.map(({p,count})=><div className="cart-row" key={p.id}><img src={p.image||p.image_url||logo()} alt="" /><div><b>{p.title}</b><span>{money(Number(p.price_minor??Math.round((p.price||0)*100)),p.currency)}</span><div className="cart-qty"><button onClick={()=>change(p.id,-1)}>−</button><strong>{count}</strong><button onClick={()=>change(p.id,1)}>＋</button></div></div><button className="secondary mini danger" onClick={()=>setCart(prev=>prev.filter(x=>x.id!==p.id))}>Удалить</button></div>):<div className="chat-empty chat-empty-card">Корзина пуста.</div>}<div className="cart-total"><span>Итого</span><strong>{money(total)}</strong></div>{groups.length>0&&<button className="primary wide" disabled={loading} onClick={()=>void checkout()}>{loading?"Оформляем заказ…":"Оформить заказ"}</button>}<p className="small">Nookly не удерживает комиссию с продаж. Подписок и комиссии Nookly нет.</p></div>
+ return <div className="hero cart-page"><div className="chat-head"><div><h1>Корзина</h1><span className="small">{cart.length} товаров</span></div></div>{groups.length?groups.map(({p,count})=><div className="cart-row" key={p.id}><img src={p.image||p.image_url||logo()} alt="" /><div><b>{p.title}</b><span>{money(Number(p.price_minor??Math.round((p.price||0)*100)),p.currency)}</span><div className="cart-qty"><button disabled={loading} onClick={()=>change(p.id,-1)}>−</button><strong>{count}</strong><button disabled={loading} onClick={()=>change(p.id,1)}>＋</button></div></div><button className="secondary mini danger" disabled={loading} onClick={()=>setCart(prev=>prev.filter(x=>x.id!==p.id))}>Удалить</button></div>):<div className="chat-empty chat-empty-card">Корзина пуста.</div>}<div className="cart-total"><span>Итого</span><strong>{money(total)}</strong></div>{groups.length>0&&<button className="primary wide" disabled={loading} onClick={()=>void checkout()}>{loading?"Оформляем заказ…":"Оформить заказ"}</button>}<p className="small">Nookly не удерживает комиссию с продаж. Подписок и комиссии Nookly нет.</p></div>
 }
 
 function Card({p,open,add,toggleFavorite,isFavorite}:{p:Product;open:()=>void;add:()=>void;toggleFavorite:(p:Product)=>Promise<void>;isFavorite:boolean}){
