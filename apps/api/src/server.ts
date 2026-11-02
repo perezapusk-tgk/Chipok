@@ -183,12 +183,6 @@ setInterval(()=>{expireUnpaidOrders().catch(error=>app.log.error(error,"Failed t
 app.addHook("onRequest",async(req,reply)=>{const key=`${req.ip}:${req.method}:${req.url.split("?")[0]}`;if(!rateLimit(key)){reply.header("Retry-After","60");return reply.code(429).send({error:"Слишком много запросов. Попробуйте позже."})}});
 
 function reliabilityLevel(score:number){if(score<50)return "blocked";if(score<60)return "restricted";if(score<80)return "warning";return "stable"}
-const SELLER_PLANS={start:{price:19900,label:"Старт"},standard:{price:0,label:"Стандарт"},plus:{price:69900,label:"Плюс"}} as const;
-async function activeSellerSubscription(userId:string,client:any=pool){
- const r=await client.query("select id,plan,expires_at from seller_subscriptions where user_id=$1 and status='active' and ((plan='standard' and amount_minor=0) or expires_at>now()) order by expires_at desc nulls first limit 1",[userId]);
- return r.rows[0]||null;
-}
-
 function hashHandover(code:string){return createHash("sha256").update(code).digest("hex")}
 function makeHandoverCode(){return String(randomInt(100000,1000000))}
 function handoverKey(){return createHash("sha256").update(env("TELEGRAM_BOT_TOKEN")).digest()}
@@ -269,7 +263,7 @@ app.post("/api/auth/telegram",async(req)=>({user:await auth(req)}));
 app.get("/api/categories",async()=>({items:(await pool.query("select id,name,slug,parent_id,restricted,age_restriction from categories order by name")).rows}));
 app.get("/api/catalog",async(req)=>{
  const q=z.object({search:z.string().trim().max(100).optional(),categoryId:z.string().uuid().optional(),limit:z.coerce.number().int().min(1).max(50).default(20),offset:z.coerce.number().int().min(0).default(0)}).parse(req.query);
- const values:any[]=[];const where:string[]=[`p.status='published'`,`exists(select 1 from seller_subscriptions ss where ss.user_id=p.seller_id and ss.status='active' and ((ss.plan='standard' and ss.amount_minor=0) or ss.expires_at>now()))`,`exists(select 1 from seller_profiles sp where sp.user_id=p.seller_id and ((sp.payment_method='link' and nullif(trim(sp.payment_link),'') is not null) or (sp.payment_method<>'link' and nullif(trim(sp.payment_details),'') is not null)))`];
+ const values:any[]=[];const where:string[]=[`p.status='published'`,`exists(select 1 from seller_profiles sp where sp.user_id=p.seller_id and ((sp.payment_method='link' and nullif(trim(sp.payment_link),'') is not null) or (sp.payment_method<>'link' and nullif(trim(sp.payment_details),'') is not null)))`];
  if(q.search){values.push(`%${q.search}%`);where.push(`(p.title ilike $${values.length} or coalesce(p.description,'') ilike $${values.length})`)}
  if(q.categoryId){values.push(q.categoryId);where.push(`p.category_id=$${values.length}`)}
  const limitParam=values.length+1; const offsetParam=values.length+2; values.push(q.limit,q.offset);
@@ -297,7 +291,7 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
    const sellerReliability=Number(sellerProfile?.reliability_score ?? 0);
    const paymentConfigured=sellerProfile?.payment_method==="link"?Boolean(sellerProfile?.payment_link):Boolean(String(sellerProfile?.payment_details||"").trim());
    if(!paymentConfigured)throw Object.assign(new Error("Продавец ещё не настроил способ получения оплаты. Выберите другой товар или попробуйте позже."),{statusCode:409});
-   if(p.role!=="seller" || sellerReliability<60 || !await activeSellerSubscription(p.seller_id,c))throw Object.assign(new Error("Продавец временно недоступен: подписка не активна или продажи ограничены"),{statusCode:409});
+   if(p.role!=="seller" || sellerReliability<60)throw Object.assign(new Error("Продавец временно недоступен: продажи ограничены правилами надёжности"),{statusCode:409});
    if(p.stock-p.reserved<item.quantity)throw Object.assign(new Error("Insufficient stock"),{statusCode:409});
    if(currency===null)currency=p.currency;else if(currency!==p.currency)throw Object.assign(new Error('All items in one order must use the same currency'),{statusCode:409}); const line=Number(p.price_minor)*item.quantity,fee=Math.floor(line*bps/10000);total+=line;feeTotal+=fee;
    const g=groups.get(p.seller_id)||{sellerId:p.seller_id,subtotal:0,fee:0,fulfillment:p.fulfillment_type,items:[]};g.subtotal+=line;g.fee+=fee;g.items.push({...item,title:p.title,price:Number(p.price_minor)});groups.set(p.seller_id,g);
@@ -527,54 +521,20 @@ app.get("/api/seller/payouts",async(req)=>{
 });
 app.post("/api/seller/onboard",async(req,reply)=>{
  const user=await auth(req);
- const body=z.object({storeName:z.string().trim().min(2).max(100),description:z.string().trim().max(1000).optional(),plan:z.enum(["start","standard","plus"]).default("standard"),promoCode:z.string().trim().max(32).optional()}).parse(req.body);
- if(body.promoCode?.toUpperCase()==="START99")return reply.code(410).send({error:"Промокод START99 отключён."});
- const plan=SELLER_PLANS[body.plan];
- const request=await withTransaction(async(c)=>{
+ const body=z.object({storeName:z.string().trim().min(2).max(100),description:z.string().trim().max(1000).optional(),promoCode:z.string().trim().max(32).optional()}).parse(req.body);
+ if(body.promoCode?.toUpperCase()==="START99")return reply.code(410).send({error:"Промокод START99 отключён. В Nookly нет платных подписок или тарифов."});
+ const store=await withTransaction(async(c)=>{
   await c.query("insert into seller_profiles(user_id,display_name,description) values($1,$2,$3) on conflict(user_id) do update set display_name=excluded.display_name,description=excluded.description",[user.id,body.storeName,body.description||null]);
-  await c.query("insert into stores(seller_id,name,description) values($1,$2,$3) on conflict(seller_id) do update set name=excluded.name,description=excluded.description",[user.id,body.storeName,body.description||null]);
-  if(body.plan==="standard"){
-   await c.query("update seller_subscriptions set status='cancelled',updated_at=now() where user_id=$1 and status='pending'",[user.id]);
-   let free=(await c.query("select id,status,plan,amount_minor,promo_code from seller_subscriptions where user_id=$1 and status='active' and plan='standard' and amount_minor=0 order by created_at desc limit 1 for update",[user.id])).rows[0];
-   if(!free)free=(await c.query("insert into seller_subscriptions(user_id,plan,status,amount_minor,promo_code,payment_method,starts_at,expires_at) values($1,'standard','active',0,null,'bank_transfer',now(),null) returning id,status,plan,amount_minor,promo_code",[user.id])).rows[0];
-   await c.query("update users set role=case when role='admin' then role else 'seller' end,updated_at=now() where id=$1",[user.id]);
-   return free;
-  }
-  const pending=(await c.query("select id,status,plan,amount_minor,promo_code from seller_subscriptions where user_id=$1 and status='pending' order by created_at desc limit 1 for update",[user.id])).rows[0];
-  if(pending)return pending;
-  return (await c.query("insert into seller_subscriptions(user_id,plan,status,amount_minor,promo_code,payment_method) values($1,$2,'pending',$3,null,'bank_transfer') returning id,status,plan,amount_minor,promo_code",[user.id,body.plan,plan.price])).rows[0];
+  const result=await c.query("insert into stores(seller_id,name,description) values($1,$2,$3) on conflict(seller_id) do update set name=excluded.name,description=excluded.description returning id,seller_id,name,description",[user.id,body.storeName,body.description||null]);
+  await c.query("update users set role=case when role='admin' then role else 'seller' end,updated_at=now() where id=$1",[user.id]);
+  return result.rows[0];
  });
- return {seller:request.status==="active",role:request.status==="active"?"seller":user.role,subscription:request,paymentDetails:request.status==="active"?null:process.env.SELLER_SUBSCRIPTION_PAYMENT_DETAILS||null,supportUrl:"https://t.me/nikita_seton"};
+ return reply.code(200).send({seller:true,role:user.role==="admin"?"admin":"seller",store,subscription:null,message:"Кабинет продавца создан. В Nookly нет абонентской платы и комиссии с продаж."});
 });
-app.get("/api/seller/subscription",async(req)=>{const user=await auth(req);const r=await pool.query("select id,plan,status,amount_minor,promo_code,starts_at,expires_at,created_at from seller_subscriptions where user_id=$1 order by created_at desc limit 1",[user.id]);return {subscription:r.rows[0]||null,paymentDetails:process.env.SELLER_SUBSCRIPTION_PAYMENT_DETAILS||null};});
-app.get("/api/admin/subscriptions",async(req,reply)=>{
- const admin=await auth(req);
- if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
- const r=await pool.query("select ss.id,ss.user_id,ss.plan,ss.status,ss.amount_minor,ss.promo_code,ss.payment_method,ss.created_at,u.first_name,u.username,sp.display_name,st.name as store_name from seller_subscriptions ss join users u on u.id=ss.user_id left join seller_profiles sp on sp.user_id=ss.user_id left join stores st on st.seller_id=ss.user_id where ss.status='pending' order by ss.created_at asc");
- return {items:r.rows};
-});
-app.post("/api/admin/subscriptions/:id/confirm-payment",async(req,reply)=>{
- const admin=await auth(req);
- if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
- const id=z.string().uuid().parse((req.params as any).id);
- const result=await withTransaction(async(c)=>{
-  const sub=(await c.query("select * from seller_subscriptions where id=$1 for update",[id])).rows[0];
-  if(!sub)return null;
-  if(sub.status!=="pending")throw Object.assign(new Error("Заявка уже обработана"),{statusCode:409});
-  const periodStart=(await c.query("select greatest(now(),coalesce(max(expires_at),now())) as starts_at from seller_subscriptions where user_id=$1 and status='active' and expires_at>now()",[sub.user_id])).rows[0].starts_at;
-  await c.query("update seller_subscriptions set status='active',starts_at=$2,expires_at=$2::timestamptz+interval '30 days',activated_by=$3,payment_confirmed_at=now(),updated_at=now() where id=$1",[id,periodStart,admin.id]);
-  await c.query("update users set role=case when role='admin' then role else 'seller' end,updated_at=now() where id=$1",[sub.user_id]);
-  return {userId:sub.user_id,plan:sub.plan,amount_minor:sub.amount_minor};
- });
- if(!result)return reply.code(404).send({error:"Заявка не найдена"});
- await pool.query("insert into notifications(user_id,type,title,body) values($1,'seller_subscription_active','Оплата подтверждена — подписка активирована','Платёж получен. Подписка продавца действует 30 дней. Теперь можно размещать товары.')",[result.userId]);
- return {ok:true,...result};
-});
-app.post("/api/admin/subscriptions/:id/activate",async(req,reply)=>{
- const admin=await auth(req);
- if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
- return reply.code(410).send({error:"Используйте подтверждение фактически полученного перевода."});
-});
+app.get("/api/seller/subscription",async(_req,reply)=>reply.code(410).send({error:"Nookly не использует подписки продавцов."}));
+app.get("/api/admin/subscriptions",async(_req,reply)=>reply.code(410).send({error:"В Nookly нет подписок продавцов."}));
+app.post("/api/admin/subscriptions/:id/confirm-payment",async(_req,reply)=>reply.code(410).send({error:"В Nookly нет платных подписок продавцов."}));
+app.post("/api/admin/subscriptions/:id/activate",async(_req,reply)=>reply.code(410).send({error:"В Nookly нет платных подписок продавцов."}));
 app.post("/api/admin/products/:id/moderate",async(req,reply)=>{
  const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
  const id=z.string().uuid().parse((req.params as any).id);const body=z.object({action:z.enum(["approve","reject"]),reason:z.string().trim().max(500).optional()}).parse(req.body);
@@ -595,7 +555,7 @@ app.get("/api/chat/threads",async(req)=>{const user=await auth(req);const r=awai
 app.get("/api/chat/threads/:id/messages",async(req,reply)=>{const user=await auth(req);const id=z.string().uuid().parse((req.params as any).id);const t=(await pool.query("select * from chat_threads where id=$1 and (buyer_id=$2 or seller_id=$2)",[id,user.id])).rows[0];if(!t)return reply.code(404).send({error:"Thread not found"});const r=await pool.query("select id,sender_id,body,created_at from chat_messages where thread_id=$1 order by created_at asc",[id]);return {thread:t,messages:r.rows};});
 app.post("/api/chat/threads/:id/messages",async(req,reply)=>{const user=await auth(req);const id=z.string().uuid().parse((req.params as any).id);const body=z.object({body:z.string().trim().min(1).max(4000)}).parse(req.body);const t=(await pool.query("select * from chat_threads where id=$1 and (buyer_id=$2 or seller_id=$2)",[id,user.id])).rows[0];if(!t)return reply.code(404).send({error:"Thread not found"});const m=(await pool.query("insert into chat_messages(thread_id,sender_id,body) values($1,$2,$3) returning id,sender_id,body,created_at",[id,user.id,body.body])).rows[0];const recipient=user.id===t.buyer_id?t.seller_id:t.buyer_id;await pool.query("insert into notifications(user_id,type,title,body) values($1,'chat_message','Новое сообщение',$2)",[recipient,body.body.slice(0,180)]);return reply.code(201).send({message:m});});
 
-app.post("/api/chat/threads/:id/offers",async(req,reply)=>{const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});if(seller.role!=="admin"&&!await activeSellerSubscription(seller.id))return reply.code(402).send({error:"Для работы продавцом нужна активная подписка. Продлите её в профиле."});const id=z.string().uuid().parse((req.params as any).id);const body=z.object({productId:z.string().uuid().optional(),title:z.string().trim().min(2).max(120),priceMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB"),quantity:z.number().int().min(1).max(100),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),expiresAt:z.string().datetime().optional()}).parse(req.body);const t=(await pool.query("select * from chat_threads where id=$1 and seller_id=$2",[id,seller.id])).rows[0];if(!t)return reply.code(404).send({error:"Thread not found"});const offer=(await pool.query("insert into offers(thread_id,seller_id,buyer_id,product_id,title,price_minor,currency,quantity,fulfillment_type,expires_at) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *",[id,seller.id,t.buyer_id,body.productId||null,body.title,body.priceMinor,body.currency.toUpperCase(),body.quantity,body.fulfillmentType,body.expiresAt||null])).rows[0];await pool.query("insert into notifications(user_id,type,title,body) values($1,'offer','Новое предложение',$2)",[t.buyer_id,body.title]);return reply.code(201).send({offer});});
+app.post("/api/chat/threads/:id/offers",async(req,reply)=>{const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});const id=z.string().uuid().parse((req.params as any).id);const body=z.object({productId:z.string().uuid().optional(),title:z.string().trim().min(2).max(120),priceMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB"),quantity:z.number().int().min(1).max(100),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),expiresAt:z.string().datetime().optional()}).parse(req.body);const t=(await pool.query("select * from chat_threads where id=$1 and seller_id=$2",[id,seller.id])).rows[0];if(!t)return reply.code(404).send({error:"Thread not found"});const offer=(await pool.query("insert into offers(thread_id,seller_id,buyer_id,product_id,title,price_minor,currency,quantity,fulfillment_type,expires_at) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *",[id,seller.id,t.buyer_id,body.productId||null,body.title,body.priceMinor,body.currency.toUpperCase(),body.quantity,body.fulfillmentType,body.expiresAt||null])).rows[0];await pool.query("insert into notifications(user_id,type,title,body) values($1,'offer','Новое предложение',$2)",[t.buyer_id,body.title]);return reply.code(201).send({offer});});
 app.get("/api/chat/offers",async(req)=>{const user=await auth(req);const r=await pool.query("select * from offers where buyer_id=$1 or seller_id=$1 order by created_at desc",[user.id]);return {items:r.rows};});
 app.post("/api/chat/offers/:id/accept",async(req,reply)=>{const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);const offer=(await pool.query("select * from offers where id=$1 and buyer_id=$2 and status='pending' and (expires_at is null or expires_at>now())",[id,buyer.id])).rows[0];if(!offer)return reply.code(404).send({error:"Offer not found or expired"});if(!offer.product_id)return reply.code(400).send({error:"Offer is missing product"});const order=await withTransaction(async(c)=>{
  const currentOffer=(await c.query("select * from offers where id=$1 and buyer_id=$2 and status='pending' and (expires_at is null or expires_at>now()) for update",[id,buyer.id])).rows[0];
@@ -756,7 +716,7 @@ app.get("/api/seller/products",async(req)=>{
  return {items:r.rows};
 });
 app.patch("/api/seller/products/:id",async(req,reply)=>{
- const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});if(seller.role!=="admin"&&!await activeSellerSubscription(seller.id))return reply.code(402).send({error:"Для работы продавцом нужна активная подписка. Продлите её в профиле."});
+ const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
  const id=z.string().uuid().parse((req.params as any).id);
  const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().refine(v=>v.startsWith("data:image/")||v.startsWith("https://"),"Invalid image URL").optional()}).parse(req.body);
  const updated=await withTransaction(async(c)=>{
@@ -772,7 +732,7 @@ app.patch("/api/seller/products/:id",async(req,reply)=>{
  return {ok:true};
 });
 app.delete("/api/seller/products/:id",async(req,reply)=>{
- const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});if(seller.role!=="admin"&&!await activeSellerSubscription(seller.id))return reply.code(402).send({error:"Для работы продавцом нужна активная подписка. Продлите её в профиле."});
+ const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
  const id=z.string().uuid().parse((req.params as any).id);
  const result=await withTransaction(async(c)=>{
   const p=(await c.query("select id,status from products where id=$1 and seller_id=$2 for update",[id,seller.id])).rows[0];
@@ -794,7 +754,7 @@ app.get("/api/images/search",async(req,reply)=>{
  }catch{return reply.code(502).send({error:"Поиск изображений временно недоступен"});}
 });
 app.post("/api/seller/products",async(req,reply)=>{
- const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});if(seller.role!=="admin"&&!await activeSellerSubscription(seller.id))return reply.code(402).send({error:"Для работы продавцом нужна активная подписка. Продлите её в профиле."});
+ const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
  const reliability=await pool.query("select reliability_score from seller_profiles where user_id=$1",[seller.id]);
  const reliabilityScore=Number(reliability.rows[0]?.reliability_score ?? 0);
  if(reliabilityLevel(reliabilityScore)==="blocked")return reply.code(403).send({error:"Публикация товаров заблокирована из-за низкой надёжности продавца"});
@@ -837,21 +797,7 @@ app.post("/api/telegram/webhook",async(req,reply)=>{
    } else if(command==="/support"){
      await telegramSendMessage(update.message.chat.id,"Техническая поддержка Nookly. Напишите нам, если возникли вопросы по заказу, оплате или работе приложения.",{inline_keyboard:[[ {text:"💬 Написать в поддержку",url:supportUrl} ]]});
    } else if(command==="/requisites"||command==="/card"){
-     const u=(await pool.query("select id from users where telegram_id=$1",[update.message.from.id])).rows[0];
-     if(!u){
-       await telegramSendMessage(update.message.chat.id,"Сначала откройте Nookly через /start, войдите в приложение и оформите заявку продавца. Затем запросите реквизиты командой /requisites.");
-     } else {
-       const pending=(await pool.query("select plan,amount_minor from seller_subscriptions where user_id=$1 and status='pending' order by created_at desc limit 1",[u.id])).rows[0];
-       const details=process.env.SELLER_SUBSCRIPTION_PAYMENT_DETAILS?.trim();
-       if(!pending){
-         await telegramSendMessage(update.message.chat.id,"У вас нет ожидающей оплаты подписки. Сначала оформите заявку продавца в Nookly.");
-       } else if(!details){
-         await telegramSendMessage(update.message.chat.id,"Реквизиты временно недоступны. Напишите в поддержку: https://t.me/nikita_seton");
-       } else {
-         const planName=pending.plan==="start"?"Старт":pending.plan==="standard"?"Стандарт":"Плюс";
-         await telegramSendMessage(update.message.chat.id,"Реквизиты для оплаты подписки Nookly\\nТариф: "+planName+"\\nСумма: "+(Number(pending.amount_minor)/100).toFixed(2)+" ₽\\n\\n"+details+"\\n\\nПосле перевода дождитесь подтверждения администратором. Не отправляйте PIN, CVV/CVC или коды из SMS.");
-       }
-     }
+     await telegramSendMessage(update.message.chat.id,"В Nookly нет абонентской платы и оплаты тарифов. Покупатель оплачивает товар напрямую продавцу по реквизитам, указанным в заказе. Продавец настраивает способ получения оплаты в своём кабинете Nookly.");
    } else if(command==="/balance"){
      const u=(await pool.query("select id from users where telegram_id=$1",[update.message.from.id])).rows[0];
      if(!u){
