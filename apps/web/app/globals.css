@@ -670,3 +670,31 @@ body{overflow-x:hidden!important;overscroll-behavior-x:none!important}
   .top .brand{gap:8px!important}
   .top .tagline{max-width:calc(100vw - 125px)!important}
 }
+
+
+/* Telegram Android WebView: render the notice in the app shell coordinate space */
+.shell{position:relative!important;overflow:visible!important}
+.toast{
+  position:absolute!important;
+  top:0!important;
+  left:12px!important;
+  right:12px!important;
+  bottom:auto!important;
+  width:auto!important;
+  max-width:none!important;
+  min-width:0!important;
+  margin:0!important;
+  transform:none!important;
+  box-sizing:border-box!important;
+  display:flex!important;
+  align-items:center!important;
+  gap:10px!important;
+}
+.toast span{
+  display:block!important;
+  flex:1 1 0!important;
+  min-width:0!important;
+  overflow-wrap:anywhere!important;
+  word-break:normal!important;
+}
+.toast button{flex:0 0 34px!important;width:34px!important;min-width:34px!important}
