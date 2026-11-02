@@ -14,7 +14,7 @@ async function notifyOrderTelegram(orderId:string,event:OrderTelegramEvent,selle
           bu.telegram_id as buyer_telegram_id,bu.first_name as buyer_name,
           so.id as seller_order_id,so.seller_id,so.subtotal_minor,so.status as seller_status,
           su.telegram_id as seller_telegram_id,coalesce(st.name,sp.display_name,su.first_name,'Магазин') as store_name,
-          coalesce((select string_agg(oi.title_snapshot||' × '||oi.quantity, E'\\n' order by oi.created_at),'' ) as items
+          coalesce(lines.items,'') as items
      from orders o join users bu on bu.id=o.buyer_id
      join seller_orders so on so.order_id=o.id join users su on su.id=so.seller_id
      left join stores st on st.seller_id=so.seller_id
