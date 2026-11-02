@@ -698,3 +698,38 @@ body{overflow-x:hidden!important;overscroll-behavior-x:none!important}
   word-break:normal!important;
 }
 .toast button{flex:0 0 34px!important;width:34px!important;min-width:34px!important}
+
+
+/* Definitive Telegram WebView fix: toast participates in layout, never uses viewport positioning */
+.shell>.toast{
+  position:relative!important;
+  inset:auto!important;
+  left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;
+  transform:none!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  margin:12px 0 16px!important;
+  box-sizing:border-box!important;
+  padding:12px 14px!important;
+  display:flex!important;
+  align-items:center!important;
+  gap:10px!important;
+  overflow:hidden!important;
+}
+.shell>.toast span{
+  flex:1 1 0!important;
+  min-width:0!important;
+  max-width:100%!important;
+  white-space:normal!important;
+  overflow-wrap:anywhere!important;
+}
+.shell>.toast button{
+  position:static!important;
+  flex:0 0 34px!important;
+  width:34px!important;
+  min-width:34px!important;
+  height:34px!important;
+  margin:0!important;
+  padding:0!important;
+}
