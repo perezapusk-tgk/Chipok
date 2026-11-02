@@ -132,6 +132,12 @@ setInterval(()=>{expireUnpaidOrders().catch(error=>app.log.error(error,"Failed t
 app.addHook("onRequest",async(req,reply)=>{const key=`${req.ip}:${req.method}:${req.url.split("?")[0]}`;if(!rateLimit(key)){reply.header("Retry-After","60");return reply.code(429).send({error:"Слишком много запросов. Попробуйте позже."})}});
 
 function reliabilityLevel(score:number){if(score<50)return "blocked";if(score<60)return "restricted";if(score<80)return "warning";return "stable"}
+const SELLER_PLANS={start:{price:19900,label:"Старт"},standard:{price:39900,label:"Стандарт"},plus:{price:69900,label:"Плюс"}} as const;
+async function activeSellerSubscription(userId:string,client:any=pool){
+ const r=await client.query("select id,plan,expires_at from seller_subscriptions where user_id=$1 and status='active' and expires_at>now() order by expires_at desc limit 1",[userId]);
+ return r.rows[0]||null;
+}
+
 function hashHandover(code:string){return createHash("sha256").update(code).digest("hex")}
 function makeHandoverCode(){return String(randomInt(100000,1000000))}
 function handoverKey(){return createHash("sha256").update(env("TELEGRAM_BOT_TOKEN")).digest()}
@@ -210,7 +216,7 @@ app.post("/api/auth/telegram",async(req)=>({user:await auth(req)}));
 app.get("/api/categories",async()=>({items:(await pool.query("select id,name,slug,parent_id,restricted,age_restriction from categories order by name")).rows}));
 app.get("/api/catalog",async(req)=>{
  const q=z.object({search:z.string().trim().max(100).optional(),categoryId:z.string().uuid().optional(),limit:z.coerce.number().int().min(1).max(50).default(20),offset:z.coerce.number().int().min(0).default(0)}).parse(req.query);
- const values:any[]=[];const where:string[]=[`p.status='published'`];
+ const values:any[]=[];const where:string[]=[`p.status='published'`,`exists(select 1 from seller_subscriptions ss where ss.user_id=p.seller_id and ss.status='active' and ss.expires_at>now())`];
  if(q.search){values.push(`%${q.search}%`);where.push(`(p.title ilike $${values.length} or coalesce(p.description,'') ilike $${values.length})`)}
  if(q.categoryId){values.push(q.categoryId);where.push(`p.category_id=$${values.length}`)}
  const limitParam=values.length+1; const offsetParam=values.length+2; values.push(q.limit,q.offset);
@@ -226,8 +232,8 @@ app.get("/api/products/:id",async(req,reply)=>{
 app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req); const body=z.object({items:z.array(z.object({productId:z.string().uuid(),quantity:z.number().int().min(1).max(100)})).min(1).max(100).superRefine((items,ctx)=>{const seen=new Set<string>();items.forEach((item,index)=>{if(seen.has(item.productId))ctx.addIssue({code:z.ZodIssueCode.custom,path:[index,"productId"],message:"Товар указан несколько раз"});seen.add(item.productId)})})}).parse(req.body);
  const order=await withTransaction(async(c)=>{
-  const bps=Math.max(0,Math.min(10000,Number(process.env.PLATFORM_COMMISSION_BPS||500)));
-  const o=(await c.query("insert into orders(buyer_id,status,total_minor,platform_fee_minor,expires_at) values($1,'created',0,0,now()+interval '30 minutes') returning id",[buyer.id])).rows[0];
+  const bps=0; // Direct buyer-seller settlement; Nookly charges no sales commission.
+  const o=(await c.query("insert into orders(buyer_id,status,total_minor,platform_fee_minor,expires_at) values($1,'created',0,0,now()+interval '24 hours') returning id",[buyer.id])).rows[0];
   const groups=new Map<string,any>();let total=0,feeTotal=0;let currency:string|null=null;
   for(const item of body.items){
    const p=(await c.query(`select p.id,p.seller_id,p.title,p.price_minor,p.currency,p.fulfillment_type,i.stock,i.reserved,u.role from products p join inventory i on i.product_id=p.id join users u on u.id=p.seller_id where p.id=$1 and p.status='published' for update of p,i,u`,[item.productId])).rows[0];
@@ -236,121 +242,44 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
    if(String(p.seller_id)===String(buyer.id))throw Object.assign(new Error("Нельзя купить собственный товар"),{statusCode:409});
    const sellerProfile=(await c.query("select reliability_score from seller_profiles where user_id=$1",[p.seller_id])).rows[0];
    const sellerReliability=Number(sellerProfile?.reliability_score ?? 0);
-   if(p.role!=="seller" || sellerReliability<60)throw Object.assign(new Error("Seller is temporarily unavailable for new orders"),{statusCode:409});
+   if(p.role!=="seller" || sellerReliability<60 || !await activeSellerSubscription(p.seller_id,c))throw Object.assign(new Error("Продавец временно недоступен: подписка не активна или продажи ограничены"),{statusCode:409});
    if(p.stock-p.reserved<item.quantity)throw Object.assign(new Error("Insufficient stock"),{statusCode:409});
    if(currency===null)currency=p.currency;else if(currency!==p.currency)throw Object.assign(new Error('All items in one order must use the same currency'),{statusCode:409}); const line=Number(p.price_minor)*item.quantity,fee=Math.floor(line*bps/10000);total+=line;feeTotal+=fee;
    const g=groups.get(p.seller_id)||{sellerId:p.seller_id,subtotal:0,fee:0,fulfillment:p.fulfillment_type,items:[]};g.subtotal+=line;g.fee+=fee;g.items.push({...item,title:p.title,price:Number(p.price_minor)});groups.set(p.seller_id,g);
    await c.query("update inventory set reserved=reserved+$1,updated_at=now() where product_id=$2",[item.quantity,p.id]);
   }
-  await c.query("update orders set total_minor=$1,platform_fee_minor=$2,currency=$3,payment_currency=null,payment_amount_minor=null,fx_rate_rub_per_payment=null,payment_rate_locked_at=null,updated_at=now() where id=$4",[total,feeTotal,currency||'RUB',o.id]);
-  await c.query("insert into payments(order_id,provider,status,amount_minor,currency) values($1,'cashera','pending',$2,'RUB') on conflict(order_id) do update set provider='cashera',status='pending',amount_minor=excluded.amount_minor,currency='RUB',updated_at=now()",[o.id,total]);
-  for(const g of groups.values()){const so=(await c.query(`insert into seller_orders(order_id,seller_id,subtotal_minor,platform_fee_minor,seller_amount_minor,fulfillment_type) values($1,$2,$3,$4,$3::bigint-$4::bigint,$5) returning id`,[o.id,g.sellerId,g.subtotal,g.fee,g.fulfillment])).rows[0];for(const item of g.items)await c.query("insert into order_items(seller_order_id,product_id,title_snapshot,unit_price_minor,quantity,total_minor) values($1,$2,$3,$4,$5,$6)",[so.id,item.productId,item.title,item.price,item.quantity,item.price*item.quantity]);}
-  return {id:o.id,totalMinor:total,platformFeeMinor:feeTotal,paymentCurrency:"RUB",paymentAmountMinor:total,fxRateRubPerPayment:null};
+  await c.query("update orders set total_minor=$1,platform_fee_minor=0,currency=$2,payment_currency=null,payment_amount_minor=null,fx_rate_rub_per_payment=null,payment_rate_locked_at=null,updated_at=now() where id=$3",[total,currency||'RUB',o.id]);
+  // Product payments are settled directly between buyer and seller.
+  for(const g of groups.values()){const so=(await c.query(`insert into seller_orders(order_id,seller_id,subtotal_minor,platform_fee_minor,seller_amount_minor,fulfillment_type) values($1,$2,$3,0,$3,$4) returning id`,[o.id,g.sellerId,g.subtotal,g.fulfillment])).rows[0];for(const item of g.items)await c.query("insert into order_items(seller_order_id,product_id,title_snapshot,unit_price_minor,quantity,total_minor) values($1,$2,$3,$4,$5,$6)",[so.id,item.productId,item.title,item.price,item.quantity,item.price*item.quantity]);}
+  return {id:o.id,totalMinor:total,platformFeeMinor:0,paymentRequired:false,settlement:"direct_with_seller"};
  }); return reply.code(201).send({order});
 });
-app.post("/api/orders/:id/payment-order",async(req,reply)=>{
+app.post("/api/orders/:id/confirm-direct-payment",async(req,reply)=>{
  const buyer=await auth(req);
  const id=z.string().uuid().parse((req.params as any).id);
- const methodBody=z.object({paymentMethod:z.string().trim().min(2).max(50).optional()}).safeParse(req.body||{});
- const paymentMethod=methodBody.success&&methodBody.data.paymentMethod?methodBody.data.paymentMethod:casheraPaymentMethod();
- const locked=await withTransaction(async(c)=>{
-   const order=(await c.query("select * from orders where id=$1 and buyer_id=$2 for update",[id,buyer.id])).rows[0];
-   if(!order)return null;
-   if(order.status!=="created")throw Object.assign(new Error("Заказ уже нельзя оплатить на этом этапе"),{statusCode:409});
-   if(String(order.currency).toUpperCase()!=="RUB")throw Object.assign(new Error("Only RUB orders can be paid through checkout"),{statusCode:409});
-   let payment=(await c.query("select * from payments where order_id=$1 for update",[id])).rows[0];
-   if(payment?.provider==="cashera"&&payment.provider_transaction_uuid&&payment.invoice_link){
-     return {orderId:id,paymentId:payment.id,totalMinor:Number(order.total_minor),paymentAmountMinor:Number(payment.amount_minor),currency:"RUB",providerUuid:String(payment.provider_transaction_uuid),externalId:String(payment.provider_external_id||id),paymentUrl:String(payment.invoice_link),status:String(payment.provider_status||payment.status),paymentMethod:String(payment.provider_payload?.payment_method||paymentMethod)};
-   }
-   if(payment&&payment.provider!=="cashera"){
-     payment=(await c.query("update payments set provider='cashera',status='pending',amount_minor=$2,currency='RUB',invoice_link=null,provider_invoice_id=null,provider_payload=null,updated_at=now() where id=$1 returning *",[payment.id,Number(order.total_minor)])).rows[0];
-   }
-   if(!payment){
-     payment=(await c.query("insert into payments(order_id,provider,status,amount_minor,currency) values($1,'cashera','pending',$2,'RUB') returning *",[id,Number(order.total_minor)])).rows[0];
-   }
-   return {orderId:id,paymentId:payment.id,totalMinor:Number(order.total_minor),paymentAmountMinor:Number(order.total_minor),currency:"RUB",providerUuid:payment.provider_transaction_uuid?String(payment.provider_transaction_uuid):null,externalId:String(payment.provider_external_id||id),paymentUrl:payment.invoice_link||null,status:String(payment.provider_status||payment.status),paymentMethod};
+ const result=await withTransaction(async(c)=>{
+  const order=(await c.query("select id,status from orders where id=$1 and buyer_id=$2 for update",[id,buyer.id])).rows[0];
+  if(!order)return null;
+  if(order.status!=="created")throw Object.assign(new Error("Этот заказ уже нельзя подтвердить как оплаченный"),{statusCode:409});
+  const sellers=(await c.query("select seller_id from seller_orders where order_id=$1 and status='created'",[id])).rows;
+  if(!sellers.length)throw Object.assign(new Error("В заказе нет ожидающих подтверждения позиций"),{statusCode:409});
+  await c.query("update orders set status='paid',updated_at=now() where id=$1",[id]);
+  await c.query("update seller_orders set status='paid' where order_id=$1 and status='created'",[id]);
+  for(const row of sellers)await c.query("insert into notifications(user_id,type,title,body) values($1,'direct_payment_confirmed','Покупатель подтвердил оплату','Покупатель отметил, что перевёл оплату напрямую. Подтвердите заказ в кабинете.')",[row.seller_id]);
+  return {id,status:"paid"};
  });
- if(!locked)return reply.code(404).send({error:"Order not found"});
- if(locked.paymentUrl)return {configured:true,...locked};
- validateHttpsUrl(casheraCallbackUrl(),"CASHERA_CALLBACK_URL");
- const successUrl=validateHttpsUrl(casheraSuccessUrl(),"CASHERA_SUCCESS_URL");
- const failUrl=validateHttpsUrl(casheraFailUrl(),"CASHERA_FAIL_URL");
- const externalId=locked.externalId;
- const tx=await casheraRequest("/integration/transactions","POST",{
-   amount:locked.paymentAmountMinor,
-   currency:"RUB",
-   ...(locked.paymentMethod?{payment_method:locked.paymentMethod}:{}),
-   external_id:externalId,
-   description:`Nookly order ${locked.orderId}`,
-   callback_url:casheraCallbackUrl(),
-   success_url:successUrl,
-   fail_url:failUrl
- });
- const snap=casheraTransactionSnapshot(tx);
- if(!snap.uuid||!snap.paymentUrl)throw Object.assign(new Error("Cashera did not return transaction uuid/payment_url"),{statusCode:502});
- const saved=await pool.query(`update payments set provider='cashera',provider_payment_id=$2,provider_invoice_id=$2,provider_external_id=$3,provider_transaction_uuid=$2,provider_status=$4,provider_paid_at=$5,provider_created_at=$6,provider_updated_at=$7,amount_minor=$8,currency='RUB',invoice_link=$9,provider_payload=$10,updated_at=now() where id=$1 returning *`,[locked.paymentId,snap.uuid,snap.externalId||externalId,snap.status,snap.paidAt,snap.createdAt,snap.updatedAt,snap.amount,snap.paymentUrl,JSON.stringify(tx)]);
- return {configured:true,orderId:locked.orderId,paymentId:locked.paymentId,totalMinor:locked.totalMinor,paymentAmountMinor:locked.paymentAmountMinor,currency:"RUB",providerUuid:snap.uuid,externalId:snap.externalId||externalId,paymentUrl:snap.paymentUrl,status:snap.status,paymentMethod:snap.paymentMethod||locked.paymentMethod};
+ if(!result)return reply.code(404).send({error:"Заказ не найден"});
+ return result;
 });
-
-async function applyCasheraTransactionStatus(tx:any,sourcePayload?:unknown){
- const snap=casheraTransactionSnapshot(tx);
- if(!snap.uuid||!snap.externalId||!snap.status)return {ok:true,ignored:true};
- return withTransaction(async(c)=>{
-   const payment=(await c.query("select p.*,o.buyer_id,o.status as order_status,o.total_minor,o.currency as order_currency from payments p join orders o on o.id=p.order_id where p.provider='cashera' and p.provider_external_id=$1 for update",[snap.externalId])).rows[0];
-   if(!payment)return {ok:true,ignored:true,reason:"unknown_external_id"};
-   const eventKey=`cashera:${snap.uuid}:${snap.status}`;
-   const seen=await c.query("select 1 from payment_transactions where idempotency_key=$1",[eventKey]);
-   if(seen.rowCount)return {ok:true,alreadyProcessed:true};
-   await c.query("insert into payment_transactions(payment_id,idempotency_key,provider_event_id,event_type,payload) values($1,$2,$3,'transaction.status_updated',$4)",[payment.id,eventKey,eventKey,JSON.stringify(sourcePayload||tx)]);
-   await c.query("update payments set provider_payment_id=$2,provider_invoice_id=$2,provider_transaction_uuid=$2,provider_status=$3,provider_paid_at=$4,provider_created_at=coalesce(provider_created_at,$5),provider_updated_at=$6,amount_minor=$7,currency=$8,status=case when $3 in ('paid','refunded','chargeback','canceled','failed','expired') then $3 else status end,updated_at=now() where id=$1",[payment.id,snap.uuid,snap.status,snap.paidAt,snap.createdAt,snap.updatedAt,snap.amount,snap.currency]);
-   if(snap.status==="paid"){
-     if(snap.currency!=="RUB"||snap.amount!==Number(payment.total_minor))throw Object.assign(new Error("Cashera paid amount/currency mismatch"),{statusCode:409});
-     if(payment.order_status==="created"){
-       await c.query("update seller_orders set status='paid' where order_id=$1 and status='created'",[payment.order_id]);
-       await c.query("update orders set status='paid',updated_at=now() where id=$1 and status='created'",[payment.order_id]);
-       await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_paid','Оплата подтверждена',$2)",[payment.buyer_id,`Заказ оплачен: ${(Number(payment.total_minor)/100).toFixed(2)} ₽. Продавец получил уведомление.`]);
-       await c.query("insert into notifications(user_id,type,title,body) select so.seller_id,'new_paid_order','Новый оплаченный заказ',$2 from seller_orders so where so.order_id=$1",[payment.order_id,`Получена оплата за заказ на ${(Number(payment.total_minor)/100).toFixed(2)} ₽. Подтвердите наличие товара.`]);
-     } else if(["cancelled","refunded","disputed"].includes(payment.order_status)){
-       await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_paid_late','Оплата подтверждена после изменения заказа',$2)",[payment.buyer_id,`Cashera подтвердил оплату заказа ${payment.order_id}, но заказ уже имеет статус «${payment.order_status}». Обратитесь в поддержку для сверки.`]);
-     }
-   } else if(["refunded","chargeback"].includes(String(snap.status))){
-     if(payment.order_status!=="refunded")await c.query("update orders set status=case when $2='refunded' then 'refunded' else 'disputed' end,updated_at=now() where id=$1",[payment.order_id,snap.status]);
-     await c.query("insert into notifications(user_id,type,title,body) values($1,'payment_reversed','Статус оплаты изменён',$2)",[payment.buyer_id,`Cashera сообщил статус «${snap.status}» для заказа ${payment.order_id}. Выплата продавцу требует сверки.`]);
-   }
-   return {ok:true,status:snap.status,orderId:payment.order_id};
- });
-}
-
-app.post("/webhooks/cashera",async(req:any,reply)=>{
- const apiKey=String(req.headers["x-api-key"]||"");
- const secret=String(req.headers["x-secret"]||"");
- if(!apiKey||!secret||!constantTimeEqual(apiKey,casheraApiKey())||!constantTimeEqual(secret,casheraSecret()))return reply.code(401).send({error:"Unauthorized"});
- const body=req.body as any;
- if(body?.event!=="transaction.status_updated")return reply.code(200).send({ok:true});
- try{
-   const tx=body.transaction;
-   if(tx?.status==="paid"){
-     const externalId=String(tx?.external_id||"");
-     const expected=(await pool.query("select amount_minor,currency,provider_transaction_uuid from payments where provider='cashera' and provider_external_id=$1",[externalId])).rows[0];
-     if(!expected)return reply.code(200).send({ok:true});
-     if(Number(expected.amount_minor)!==Number(tx.amount)||String(expected.currency).toUpperCase()!==String(tx.currency).toUpperCase())return reply.code(200).send({ok:true});
-   }
-   await applyCasheraTransactionStatus(body.transaction,body);
- }catch(error:any){
-   if(error?.statusCode===409)app.log.warn({error:"Cashera payment rejected by validation"},"Cashera webhook business validation failed");
-   else app.log.error({err:error},"Cashera webhook processing failed");
- }
- return reply.code(200).send({ok:true});
+app.post("/api/orders/:id/payment-order",async(req,reply)=>{
+ await auth(req);
+ return reply.code(410).send({error:"Оплата товаров через Nookly отключена. Покупатель и продавец рассчитываются напрямую."});
 });
-app.get("/api/admin/payments/:orderId/cashera-status",async(req,reply)=>{
- const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
- const orderId=z.string().uuid().parse((req.params as any).orderId);
- const local=(await pool.query("select p.provider_transaction_uuid,p.provider_external_id,o.total_minor,o.currency from payments p join orders o on o.id=p.order_id where p.order_id=$1 and p.provider='cashera'",[orderId])).rows[0];
- if(!local)return reply.code(404).send({error:"Cashera payment not found"});
- const tx=local.provider_transaction_uuid?await casheraRequest(`/integration/transactions/${encodeURIComponent(local.provider_transaction_uuid)}`,"GET"):await casheraRequest(`/integration/transactions/by-external-id/${encodeURIComponent(local.provider_external_id)}`,"GET");
- const snap=casheraTransactionSnapshot(tx);
- await applyCasheraTransactionStatus(tx);
- return {transaction:snap,orderId,expectedAmountMinor:Number(local.total_minor),expectedCurrency:String(local.currency).toUpperCase()};
+app.post("/webhooks/cashera",async(_req,reply)=>{
+ return reply.code(410).send({error:"Cashera product payments are disabled. Buyer and seller settle directly."});
+});
+app.get("/api/admin/payments/:orderId/cashera-status",async(_req,reply)=>{
+ return reply.code(410).send({error:"Cashera product payments are disabled."});
 });
 app.get("/pay/ok",async(_req,reply)=>{const target=process.env.TELEGRAM_WEBAPP_URL?.trim();if(target)return reply.redirect(target);return reply.type("text/html").send("<!doctype html><title>Nookly</title><p>Оплата завершена. Вернитесь в Nookly.</p>");});
 app.get("/pay/fail",async(_req,reply)=>{const target=process.env.TELEGRAM_WEBAPP_URL?.trim();if(target)return reply.redirect(target);return reply.type("text/html").send("<!doctype html><title>Nookly</title><p>Оплата не завершена. Вернитесь в Nookly и попробуйте снова.</p>");});
@@ -523,15 +452,27 @@ app.get("/api/seller/payouts",async(req)=>{
 });
 app.post("/api/seller/onboard",async(req,reply)=>{
  const user=await auth(req);
- if(user.role==="admin"||user.role==="seller")return {seller:true,role:user.role};
- const body=z.object({storeName:z.string().trim().min(2).max(100),description:z.string().trim().max(1000).optional()}).parse(req.body);
- await withTransaction(async(c)=>{
-  await c.query("update users set role='seller',updated_at=now() where id=$1",[user.id]);
+ if(user.role==="admin")return {seller:true,role:"admin",active:true};
+ const body=z.object({storeName:z.string().trim().min(2).max(100),description:z.string().trim().max(1000).optional(),plan:z.enum(["start","standard","plus"]).default("start"),promoCode:z.string().trim().max(32).optional()}).parse(req.body);
+ const plan=SELLER_PLANS[body.plan];
+ const request=await withTransaction(async(c)=>{
   await c.query("insert into seller_profiles(user_id,display_name,description) values($1,$2,$3) on conflict(user_id) do update set display_name=excluded.display_name,description=excluded.description",[user.id,body.storeName,body.description||null]);
   await c.query("insert into stores(seller_id,name,description) values($1,$2,$3) on conflict(seller_id) do update set name=excluded.name,description=excluded.description",[user.id,body.storeName,body.description||null]);
+  const pending=(await c.query("select id,status,plan,amount_minor,promo_code from seller_subscriptions where user_id=$1 and status='pending' order by created_at desc limit 1 for update",[user.id])).rows[0];
+  if(pending)return pending;
+  let amount:number=plan.price;let promoCode:null|string=null;
+  if(body.promoCode?.toUpperCase()==="START99"){
+   const promo=(await c.query("select * from seller_subscription_promotions where code='START99' and active=true and redeemed_count<least(max_redemptions,5) for update")).rows[0];
+   if(promo){amount=Number(promo.discount_amount_minor);promoCode="START99";await c.query("update seller_subscription_promotions set redeemed_count=redeemed_count+1 where code='START99'");}
+  }
+  return (await c.query("insert into seller_subscriptions(user_id,plan,status,amount_minor,promo_code,payment_method) values($1,$2,'pending',$3,$4,'bank_transfer') returning id,status,plan,amount_minor,promo_code",[user.id,body.plan,amount,promoCode])).rows[0];
  });
- return {seller:true,role:"seller"};
+ return {seller:false,role:user.role,subscription:request,paymentDetails:process.env.SELLER_SUBSCRIPTION_PAYMENT_DETAILS||null,supportUrl:"https://t.me/nikita_seton"};
 });
+app.get("/api/seller/subscription",async(req)=>{const user=await auth(req);const r=await pool.query("select id,plan,status,amount_minor,promo_code,starts_at,expires_at,created_at from seller_subscriptions where user_id=$1 order by created_at desc limit 1",[user.id]);return {subscription:r.rows[0]||null,paymentDetails:process.env.SELLER_SUBSCRIPTION_PAYMENT_DETAILS||null};});
+app.get("/api/admin/subscriptions",async(req,reply)=>{const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});const r=await pool.query("select ss.id,ss.user_id,ss.plan,ss.status,ss.amount_minor,ss.promo_code,ss.created_at,u.first_name,u.username,sp.display_name from seller_subscriptions ss join users u on u.id=ss.user_id left join seller_profiles sp on sp.user_id=ss.user_id where ss.status='pending' order by ss.created_at asc");return {items:r.rows};});
+app.post("/api/admin/subscriptions/:id/activate",async(req,reply)=>{const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});const id=z.string().uuid().parse((req.params as any).id);const result=await withTransaction(async(c)=>{const sub=(await c.query("select * from seller_subscriptions where id=$1 for update",[id])).rows[0];if(!sub)return null;if(sub.status!=="pending")throw Object.assign(new Error("Заявка уже обработана"),{statusCode:409});const periodStart=(await c.query("select greatest(now(),coalesce(max(expires_at),now())) as starts_at from seller_subscriptions where user_id=$1 and status='active' and expires_at>now()",[sub.user_id])).rows[0].starts_at;
+ await c.query("update seller_subscriptions set status='active',starts_at=$2,expires_at=$2::timestamptz+interval '30 days',activated_by=$3,updated_at=now() where id=$1",[id,periodStart,admin.id]);await c.query("update users set role='seller',updated_at=now() where id=$1",[sub.user_id]);return {userId:sub.user_id,plan:sub.plan};});if(!result)return reply.code(404).send({error:"Заявка не найдена"});await pool.query("insert into notifications(user_id,type,title,body) values($1,'seller_subscription_active','Подписка активирована','Подписка продавца действует 30 дней. Теперь можно размещать товары.')",[result.userId]);return {ok:true,...result};});
 app.post("/api/admin/products/:id/moderate",async(req,reply)=>{
  const admin=await auth(req);if(admin.role!=="admin")return reply.code(403).send({error:"Forbidden"});
  const id=z.string().uuid().parse((req.params as any).id);const body=z.object({action:z.enum(["approve","reject"]),reason:z.string().trim().max(500).optional()}).parse(req.body);
@@ -552,7 +493,7 @@ app.get("/api/chat/threads",async(req)=>{const user=await auth(req);const r=awai
 app.get("/api/chat/threads/:id/messages",async(req,reply)=>{const user=await auth(req);const id=z.string().uuid().parse((req.params as any).id);const t=(await pool.query("select * from chat_threads where id=$1 and (buyer_id=$2 or seller_id=$2)",[id,user.id])).rows[0];if(!t)return reply.code(404).send({error:"Thread not found"});const r=await pool.query("select id,sender_id,body,created_at from chat_messages where thread_id=$1 order by created_at asc",[id]);return {thread:t,messages:r.rows};});
 app.post("/api/chat/threads/:id/messages",async(req,reply)=>{const user=await auth(req);const id=z.string().uuid().parse((req.params as any).id);const body=z.object({body:z.string().trim().min(1).max(4000)}).parse(req.body);const t=(await pool.query("select * from chat_threads where id=$1 and (buyer_id=$2 or seller_id=$2)",[id,user.id])).rows[0];if(!t)return reply.code(404).send({error:"Thread not found"});const m=(await pool.query("insert into chat_messages(thread_id,sender_id,body) values($1,$2,$3) returning id,sender_id,body,created_at",[id,user.id,body.body])).rows[0];const recipient=user.id===t.buyer_id?t.seller_id:t.buyer_id;await pool.query("insert into notifications(user_id,type,title,body) values($1,'chat_message','Новое сообщение',$2)",[recipient,body.body.slice(0,180)]);return reply.code(201).send({message:m});});
 
-app.post("/api/chat/threads/:id/offers",async(req,reply)=>{const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});const id=z.string().uuid().parse((req.params as any).id);const body=z.object({productId:z.string().uuid().optional(),title:z.string().trim().min(2).max(120),priceMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB"),quantity:z.number().int().min(1).max(100),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),expiresAt:z.string().datetime().optional()}).parse(req.body);const t=(await pool.query("select * from chat_threads where id=$1 and seller_id=$2",[id,seller.id])).rows[0];if(!t)return reply.code(404).send({error:"Thread not found"});const offer=(await pool.query("insert into offers(thread_id,seller_id,buyer_id,product_id,title,price_minor,currency,quantity,fulfillment_type,expires_at) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *",[id,seller.id,t.buyer_id,body.productId||null,body.title,body.priceMinor,body.currency.toUpperCase(),body.quantity,body.fulfillmentType,body.expiresAt||null])).rows[0];await pool.query("insert into notifications(user_id,type,title,body) values($1,'offer','Новое предложение',$2)",[t.buyer_id,body.title]);return reply.code(201).send({offer});});
+app.post("/api/chat/threads/:id/offers",async(req,reply)=>{const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});if(seller.role!=="admin"&&!await activeSellerSubscription(seller.id))return reply.code(402).send({error:"Для работы продавцом нужна активная подписка. Продлите её в профиле."});const id=z.string().uuid().parse((req.params as any).id);const body=z.object({productId:z.string().uuid().optional(),title:z.string().trim().min(2).max(120),priceMinor:z.number().int().positive(),currency:z.string().length(3).default("RUB"),quantity:z.number().int().min(1).max(100),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),expiresAt:z.string().datetime().optional()}).parse(req.body);const t=(await pool.query("select * from chat_threads where id=$1 and seller_id=$2",[id,seller.id])).rows[0];if(!t)return reply.code(404).send({error:"Thread not found"});const offer=(await pool.query("insert into offers(thread_id,seller_id,buyer_id,product_id,title,price_minor,currency,quantity,fulfillment_type,expires_at) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *",[id,seller.id,t.buyer_id,body.productId||null,body.title,body.priceMinor,body.currency.toUpperCase(),body.quantity,body.fulfillmentType,body.expiresAt||null])).rows[0];await pool.query("insert into notifications(user_id,type,title,body) values($1,'offer','Новое предложение',$2)",[t.buyer_id,body.title]);return reply.code(201).send({offer});});
 app.get("/api/chat/offers",async(req)=>{const user=await auth(req);const r=await pool.query("select * from offers where buyer_id=$1 or seller_id=$1 order by created_at desc",[user.id]);return {items:r.rows};});
 app.post("/api/chat/offers/:id/accept",async(req,reply)=>{const buyer=await auth(req);const id=z.string().uuid().parse((req.params as any).id);const offer=(await pool.query("select * from offers where id=$1 and buyer_id=$2 and status='pending' and (expires_at is null or expires_at>now())",[id,buyer.id])).rows[0];if(!offer)return reply.code(404).send({error:"Offer not found or expired"});if(!offer.product_id)return reply.code(400).send({error:"Offer is missing product"});const order=await withTransaction(async(c)=>{
  const currentOffer=(await c.query("select * from offers where id=$1 and buyer_id=$2 and status='pending' and (expires_at is null or expires_at>now()) for update",[id,buyer.id])).rows[0];
@@ -700,7 +641,7 @@ app.get("/api/seller/products",async(req)=>{
  return {items:r.rows};
 });
 app.patch("/api/seller/products/:id",async(req,reply)=>{
- const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
+ const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});if(seller.role!=="admin"&&!await activeSellerSubscription(seller.id))return reply.code(402).send({error:"Для работы продавцом нужна активная подписка. Продлите её в профиле."});
  const id=z.string().uuid().parse((req.params as any).id);
  const body=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(5000).optional(),priceMinor:z.number().int().positive(),categoryId:z.string().uuid().optional(),stock:z.number().int().min(0).max(100000),fulfillmentType:z.enum(["meeting","pickup"]).default("pickup"),imageUrl:z.string().refine(v=>v.startsWith("data:image/")||v.startsWith("https://"),"Invalid image URL").optional()}).parse(req.body);
  const updated=await withTransaction(async(c)=>{
@@ -716,7 +657,7 @@ app.patch("/api/seller/products/:id",async(req,reply)=>{
  return {ok:true};
 });
 app.delete("/api/seller/products/:id",async(req,reply)=>{
- const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
+ const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});if(seller.role!=="admin"&&!await activeSellerSubscription(seller.id))return reply.code(402).send({error:"Для работы продавцом нужна активная подписка. Продлите её в профиле."});
  const id=z.string().uuid().parse((req.params as any).id);
  const result=await withTransaction(async(c)=>{
   const p=(await c.query("select id,status from products where id=$1 and seller_id=$2 for update",[id,seller.id])).rows[0];
@@ -738,7 +679,7 @@ app.get("/api/images/search",async(req,reply)=>{
  }catch{return reply.code(502).send({error:"Поиск изображений временно недоступен"});}
 });
 app.post("/api/seller/products",async(req,reply)=>{
- const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});
+ const seller=await auth(req);if(seller.role!=="seller"&&seller.role!=="admin")return reply.code(403).send({error:"Seller access required"});if(seller.role!=="admin"&&!await activeSellerSubscription(seller.id))return reply.code(402).send({error:"Для работы продавцом нужна активная подписка. Продлите её в профиле."});
  const reliability=await pool.query("select reliability_score from seller_profiles where user_id=$1",[seller.id]);
  const reliabilityScore=Number(reliability.rows[0]?.reliability_score ?? 0);
  if(reliabilityLevel(reliabilityScore)==="blocked")return reply.code(403).send({error:"Публикация товаров заблокирована из-за низкой надёжности продавца"});
