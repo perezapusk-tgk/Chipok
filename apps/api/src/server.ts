@@ -233,7 +233,7 @@ app.post("/api/orders",async(req,reply)=>{ await expireUnpaidOrders();
  const buyer=await auth(req); const body=z.object({items:z.array(z.object({productId:z.string().uuid(),quantity:z.number().int().min(1).max(100)})).min(1).max(100).superRefine((items,ctx)=>{const seen=new Set<string>();items.forEach((item,index)=>{if(seen.has(item.productId))ctx.addIssue({code:z.ZodIssueCode.custom,path:[index,"productId"],message:"Товар указан несколько раз"});seen.add(item.productId)})})}).parse(req.body);
  const order=await withTransaction(async(c)=>{
   const bps=0; // Direct buyer-seller settlement; Nookly charges no sales commission.
-  const o=(await c.query("insert into orders(buyer_id,status,total_minor,platform_fee_minor,expires_at) values($1,'created',0,0,now()+interval '30 minutes') returning id",[buyer.id])).rows[0];
+  const o=(await c.query("insert into orders(buyer_id,status,total_minor,platform_fee_minor,expires_at) values($1,'created',0,0,now()+interval '24 hours') returning id",[buyer.id])).rows[0];
   const groups=new Map<string,any>();let total=0,feeTotal=0;let currency:string|null=null;
   for(const item of body.items){
    const p=(await c.query(`select p.id,p.seller_id,p.title,p.price_minor,p.currency,p.fulfillment_type,i.stock,i.reserved,u.role from products p join inventory i on i.product_id=p.id join users u on u.id=p.seller_id where p.id=$1 and p.status='published' for update of p,i,u`,[item.productId])).rows[0];
