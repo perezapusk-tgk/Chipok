@@ -355,7 +355,7 @@ function Profile({user,sellerProducts,setSellerProducts,loadSeller,setMessage,ca
 function SellerOnboard({setMessage,onDone,back}:{setMessage:(s:string)=>void;onDone:()=>void;back:()=>void}){
  const [storeName,setStoreName]=useState(""),[description,setDescription]=useState(""),[plan,setPlan]=useState<"start"|"standard"|"plus">("start"),[promo,setPromo]=useState("START99"),[request,setRequest]=useState<any>(null),[paymentDetails,setPaymentDetails]=useState<string|null>(null),[busy,setBusy]=useState(false);
  const plans=[
-  {id:"start",name:"Старт",price:199,desc:"До 20 активных товаров · всё необходимое для старта"},
+  {id:"start",name:"Старт",price:199,desc:"До 50 активных товаров · всё необходимое для старта"},
   {id:"standard",name:"Стандарт",price:399,desc:"До 100 активных товаров · больше возможностей для магазина"},
   {id:"plus",name:"Плюс",price:699,desc:"Без лимита на товары · максимум возможностей для активного продавца"},
  ] as const;
