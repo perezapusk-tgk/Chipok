@@ -190,7 +190,7 @@ async function activeSellerSubscription(userId:string,client:any=pool){
 }
 async function sellerPlanLimits(userId:string,client:any=pool){
  const sub=await activeSellerSubscription(userId,client); if(!sub)return null;
- return {plan:String(sub.plan),maxProducts:sub.plan==="start"?20:sub.plan==="standard"?100:Infinity};
+ return {plan:String(sub.plan),maxProducts:sub.plan==="start"?50:sub.plan==="standard"?100:Infinity};
 }
 function hashHandover(code:string){return createHash("sha256").update(code).digest("hex")}
 function makeHandoverCode(){return String(randomInt(100000,1000000))}
