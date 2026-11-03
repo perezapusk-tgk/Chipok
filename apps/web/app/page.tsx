@@ -31,7 +31,7 @@ const cats=["Все"];
 const money=(minor:number,currency="RUB")=>new Intl.NumberFormat("ru-RU",{style:"currency",currency,maximumFractionDigits:0}).format(minor/100);
 const api=()=>process.env.NEXT_PUBLIC_API_URL||(process.env.NODE_ENV==="production"?"https://nookly-api.vercel.app":"http://localhost:3001");
 const actionApi=(path:string)=>{const u=new URL(api()+path);u.searchParams.set("_action","20261026");return u.toString()};
-const logo=()=>process.env.GITHUB_PAGES==="true"?"/Chipok/nookly-logo.svg":"/nookly-logo.svg";
+const logo=()=>process.env.GITHUB_PAGES==="true"?"/Chipok/nookly-logo.svg?v=20261103":"/nookly-logo.svg?v=20261103";
 
 export default function Home(){
  const [tab,setTab]=useState("home"),[cat,setCat]=useState("Все"),[q,setQ]=useState("");
@@ -95,7 +95,7 @@ export default function Home(){
      return [...c,p];
    });
  };
- if(!booted) return <div className="app"><main className="shell boot"><div className="boot-logo"><img src={logo()} alt="Nookly" onError={e=>{e.currentTarget.style.display="none"}}/></div><h1>Nookly</h1><p>Загружаем маркетплейс…</p></main></div>;
+ if(!booted) return <div className="app"><main className="shell boot"><div className="boot-logo boot-logo-nookly"><img src={logo()} alt="Nookly" onError={e=>{e.currentTarget.src="/nookly-logo.svg?v=20261103"}}/></div><div className="boot-brand">Nookly</div><p>Загружаем маркетплейс…</p></main></div>;
  const loadFavorites=async()=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init)return;const r=await fetch(api()+"/api/favorites",{headers:{Authorization:"tma "+init}});if(r.ok){const d=await r.json();setFavoriteIds(new Set((d.items||d||[]).map((x:any)=>x.product_id||x.id)))}}; 
  const toggleFavorite=async(p:Product)=>{const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";if(!init){setMessage("Открой Nookly внутри Telegram.");return}const isFav=favoriteIds.has(p.id);const r=await fetch(api()+"/api/favorites/"+p.id,{method:isFav?"DELETE":"POST",headers:{Authorization:"tma "+init}});if(!r.ok){setMessage("Не удалось изменить избранное");return}setFavoriteIds(prev=>{const n=new Set(prev);if(isFav)n.delete(p.id);else n.add(p.id);return n});setMessage(isFav?"Удалено из избранного":"Товар добавлен в избранное.");};
  const checkout=async()=>{
@@ -152,7 +152,7 @@ export default function Home(){
        <button className="secondary" onClick={()=>setTab("chat")}>Мои чаты</button>
      </div>
    </div>
-   <div className="market-hero-orb"><img src={logo()} alt="" /></div>
+   <div className="market-hero-orb"><img src={logo()} alt="Nookly" onError={e=>{e.currentTarget.src="/nookly-logo.svg?v=20261103"}} /></div>
  </section>
  <label className="search market-search">⌕<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Найти товар или категорию"/></label>
  <div className="chips">{categoryNames.map(c=><button key={c} className={"chip "+(cat===c?"active":"")} onClick={()=>setCat(c)}>{c}</button>)}</div>
@@ -165,7 +165,7 @@ export default function Home(){
  :tab==="profile"?<Profile user={user} sellerProducts={sellerProducts} setSellerProducts={setSellerProducts} loadSeller={loadSeller} setMessage={setMessage} categories={categories} notifications={notifications} readNotification={readNotification} openProduct={async(id)=>{const r=await fetch(api()+"/api/products/"+id,{cache:"no-store"});if(r.ok){const d=await r.json();const p=d.product;if(p){setSelected({...p,image:p.images?.[0]?.url||p.image_url||"",image_url:p.images?.[0]?.url||p.image_url||""});return;}}setMessage("Товар больше недоступен в каталоге.");}}/>
  :<Cart cart={cart} total={total} setCart={setCart} checkout={checkout} loading={loading}/>;
 
- return <div className="app"><main className="shell"><header className="top"><div className="brand"><div className="brand-mark"><img src={logo()} alt="Nookly"/></div><div><div className="brand-name">Nookly</div><div className="tagline">Твой маркетплейс. Свои люди. Свои товары.</div></div></div><button className="icon-btn" onClick={()=>{setTab("profile")}} aria-label="Уведомления">🔔{notifications.some(n=>!n.read_at)&&<span style={{position:"absolute",margin:"-25px 0 0 25px",width:7,height:7,borderRadius:"50%",background:"var(--gold)"}}/>}</button></header>{message&&<div className="notice-banner" role="status"><span>{message}</span><button onClick={()=>setMessage("")} aria-label="Закрыть">×</button></div>}{page}{cart.length>0&&tab!=="cart"&&<button className="fab" onClick={()=>setTab("cart")}>🛒<span>{cart.length}</span></button>}<nav className="bottom-nav-v6"><div className="nav-v6-glow"/>{[["home","🏠","Главная"],["catalog","🛍️","Каталог"],["orders","🎁","Заказы"],["chat","💬","Чаты"],["profile","👤","Профиль"]].map(([id,ico,label])=><button key={id} className={"nav "+(tab===id?"active":"")} onClick={()=>{setTab(id);if(id==="orders")loadOrders();if(id==="profile"&&(user?.role==="seller"||user?.role==="admin"))loadSeller()}}><span className="nav-v6-icon">{ico}</span><span className="nav-v6-label">{label}</span></button>)}</nav></main></div>;
+ return <div className="app"><main className="shell"><header className="top"><div className="brand"><div className="brand-mark brand-mark-nookly"><img src={logo()} alt="Nookly" onError={e=>{e.currentTarget.src="/nookly-logo.svg?v=20261103"}}/></div><div><div className="brand-name">Nookly</div><div className="tagline">Твой маркетплейс. Свои люди. Свои товары.</div></div></div><button className="icon-btn" onClick={()=>{setTab("profile")}} aria-label="Уведомления">🔔{notifications.some(n=>!n.read_at)&&<span style={{position:"absolute",margin:"-25px 0 0 25px",width:7,height:7,borderRadius:"50%",background:"var(--gold)"}}/>}</button></header>{message&&<div className="notice-banner" role="status"><span>{message}</span><button onClick={()=>setMessage("")} aria-label="Закрыть">×</button></div>}{page}{cart.length>0&&tab!=="cart"&&<button className="fab" onClick={()=>setTab("cart")}>🛒<span>{cart.length}</span></button>}<nav className="bottom-nav-v6"><div className="nav-v6-glow"/>{[["home","🏠","Главная"],["catalog","🛍️","Каталог"],["orders","🎁","Заказы"],["chat","💬","Чаты"],["profile","👤","Профиль"]].map(([id,ico,label])=><button key={id} className={"nav "+(tab===id?"active":"")} onClick={()=>{setTab(id);if(id==="orders")loadOrders();if(id==="profile"&&(user?.role==="seller"||user?.role==="admin"))loadSeller()}}><span className="nav-v6-icon">{ico}</span><span className="nav-v6-label">{label}</span></button>)}</nav></main></div>;
 }
 
 
