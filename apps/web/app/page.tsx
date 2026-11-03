@@ -353,28 +353,46 @@ function Profile({user,sellerProducts,setSellerProducts,loadSeller,setMessage,ca
  </div>;
 }
 function SellerOnboard({setMessage,onDone,back}:{setMessage:(s:string)=>void;onDone:()=>void;back:()=>void}){
- const [storeName,setStoreName]=useState(""),[description,setDescription]=useState(""),[busy,setBusy]=useState(false);
+ const [storeName,setStoreName]=useState(""),[description,setDescription]=useState(""),[plan,setPlan]=useState<"start"|"standard"|"plus">("start"),[promo,setPromo]=useState("START99"),[request,setRequest]=useState<any>(null),[paymentDetails,setPaymentDetails]=useState<string|null>(null),[busy,setBusy]=useState(false);
+ const plans=[
+  {id:"start",name:"Старт",price:199,desc:"До 20 активных товаров · всё необходимое для старта"},
+  {id:"standard",name:"Стандарт",price:399,desc:"До 100 активных товаров · больше возможностей для магазина"},
+  {id:"plus",name:"Плюс",price:699,desc:"Без лимита на товары · максимум возможностей для активного продавца"},
+ ] as const;
  async function submit(){
   if(storeName.trim().length<2)return;
   setBusy(true);
   try{
    const init=typeof window!=="undefined"?window.Telegram?.WebApp?.initData||"":"";
-   const r=await fetch(api()+"/api/seller/onboard",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init},body:JSON.stringify({storeName:storeName.trim(),description:description.trim()||undefined})});
-   if(!r.ok)throw new Error((await r.json()).error||"Не удалось создать кабинет");
-   const data=await r.json();setMessage(data.message||"Кабинет продавца создан. Можно добавлять товары.");onDone();
+   const r=await fetch(api()+"/api/seller/onboard",{method:"POST",headers:{"content-type":"application/json",Authorization:"tma "+init},body:JSON.stringify({storeName:storeName.trim(),description:description.trim()||undefined,plan,promoCode:promo.trim()||undefined})});
+   if(!r.ok)throw new Error((await r.json()).error||"Не удалось оформить подписку");
+   const data=await r.json();setRequest(data.subscription);setPaymentDetails(data.paymentDetails||null);setMessage("Заявка создана. После подтверждения оплаты кабинет продавца будет активирован.");
   }catch(e){setMessage(e instanceof Error?e.message:"Ошибка")}
   finally{setBusy(false)}
  }
  return <div className="hero">
   <button className="icon-btn" onClick={back}>←</button>
   <h1>Стать продавцом</h1>
-  <p>Создай магазин и размещай товары бесплатно. Покупатели оплачивают товары напрямую продавцу — Nookly не удерживает комиссию с продаж.</p>
-  <div className="form-card">
+  <p>Выбирай тариф на 30 дней. Комиссия Nookly с продаж — <b>0%</b>: деньги за товар получает продавец напрямую.</p>
+  {request?<div className="form-card">
+   <h2>Заявка отправлена</h2>
+   <p><b>{plans.find(x=>x.id===request.plan)?.name||request.plan}</b> · {money(Number(request.amount_minor),"RUB")}</p>
+   {request.promo_code&&<p className="small">Промокод <b>{request.promo_code}</b> применён.</p>}
+   <p className="small">Статус: ожидает подтверждения оплаты. После подтверждения тариф действует 30 дней.</p>
+   {paymentDetails?<p style={{whiteSpace:"pre-wrap"}}>{paymentDetails}</p>:<p className="small">Реквизиты для оплаты уточни в поддержке.</p>}
+   <button className="secondary wide" onClick={back}>Назад</button>
+  </div>:<div className="form-card">
    <input value={storeName} onChange={e=>setStoreName(e.target.value)} placeholder="Название магазина или имя" maxLength={100}/>
    <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Коротко о товарах (необязательно)" rows={4} maxLength={1000}/>
-   <p className="small">Регистрация продавца бесплатная. Нет подписок, тарифов и комиссии Nookly с продаж. Покупатели оплачивают товары напрямую продавцу.</p>
-   <button className="primary wide" disabled={busy||storeName.trim().length<2} onClick={submit}>{busy?"Создаём кабинет…":"Создать бесплатный кабинет"}</button>
-  </div> </div>
+   <div className="small" style={{fontWeight:800}}>ТАРИФ НА 30 ДНЕЙ</div>
+   <div className="menu">
+    {plans.map(p=><button key={p.id} type="button" onClick={()=>setPlan(p.id)}><span><b>{p.name} · {p.price} ₽</b><br/><small>{p.desc}</small></span><b>{plan===p.id?"✓":"Выбрать"}</b></button>)}
+   </div>
+   <input value={promo} onChange={e=>setPromo(e.target.value.toUpperCase())} placeholder="Промокод (необязательно)"/>
+   <p className="small"><b>START99</b> — первый месяц за 99 ₽ для первых 5 продавцов.</p>
+   <button className="primary wide" disabled={busy||storeName.trim().length<2} onClick={submit}>{busy?"Оформляем…":"Оформить подписку"}</button>
+  </div>}
+ </div>
 }
 function AdminPanel({setMessage,back}:{setMessage:(s:string)=>void;back:()=>void}){
  const [dash,setDash]=useState<any>(null),[orders,setOrders]=useState<any[]>([]),[disputes,setDisputes]=useState<any[]>([]),[refunds,setRefunds]=useState<any[]>([]),[moderation,setModeration]=useState<any[]>([]);
