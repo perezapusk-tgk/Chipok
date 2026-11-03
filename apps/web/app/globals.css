@@ -759,3 +759,19 @@ body{overflow-x:hidden!important;overscroll-behavior-x:none!important}
 }
 .shell>.notice-banner span{flex:1 1 0!important;min-width:0!important;white-space:normal!important;overflow-wrap:anywhere!important}
 .shell>.notice-banner button{position:static!important;flex:0 0 34px!important;width:34px!important;min-width:34px!important;height:34px!important;margin:0!important;padding:0!important}
+
+
+/* Nookly logo v2 — loading + project identity */
+.boot-logo-nookly{
+  width:104px!important;height:104px!important;padding:0!important;margin:0 auto 16px!important;
+  display:grid!important;place-items:center!important;border-radius:26px!important;
+  background:#fff!important;border:3px solid rgba(255,255,255,.95)!important;
+  box-shadow:0 18px 45px rgba(0,0,0,.38),0 0 0 8px rgba(23,105,255,.10)!important;
+  overflow:hidden!important;
+}
+.boot-logo-nookly img{display:block!important;width:100%!important;height:100%!important;object-fit:cover!important}
+.boot-brand{font-size:32px!important;font-weight:900!important;letter-spacing:-.06em!important;color:#fff!important;margin-bottom:4px!important}
+.brand-mark-nookly{background:#fff!important;border:2px solid rgba(255,255,255,.95)!important;overflow:hidden!important;box-shadow:0 5px 16px rgba(0,0,0,.28)!important}
+.brand-mark-nookly img{display:block!important;width:100%!important;height:100%!important;object-fit:cover!important}
+.market-hero-orb{overflow:hidden!important;background:#fff!important}
+.market-hero-orb img{display:block!important;width:100%!important;height:100%!important;object-fit:cover!important}
