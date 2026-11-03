@@ -775,3 +775,8 @@ body{overflow-x:hidden!important;overscroll-behavior-x:none!important}
 .brand-mark-nookly img{display:block!important;width:100%!important;height:100%!important;object-fit:cover!important}
 .market-hero-orb{overflow:hidden!important;background:#fff!important}
 .market-hero-orb img{display:block!important;width:100%!important;height:100%!important;object-fit:cover!important}
+
+
+/* Nookly loading logo — normal compact size */
+.boot-logo-nookly{width:64px!important;height:64px!important;padding:0!important;margin:0 auto 12px!important;border-radius:17px!important;border:2px solid rgba(255,255,255,.92)!important;box-shadow:0 10px 24px rgba(0,0,0,.28)!important}
+.boot-brand{font-size:26px!important;margin-bottom:3px!important}
